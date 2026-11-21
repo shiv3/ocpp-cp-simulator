@@ -6,6 +6,8 @@ import type { ResponseOverrideRequest } from "../../../domain/charge-point/respo
 import type {
   OcppCallOutcome,
   OcppCallRequest,
+  OcppSendOutcome,
+  OcppSendRequest,
 } from "../../../domain/types/OcppCall";
 import type {
   CallResponseSpec,
@@ -304,6 +306,9 @@ export interface ScenarioExecutorCallbacks {
   /** #389: send an expert OCPP call; resolves with the CSMS's answer and
    *  rejects when the call is refused or gets no answer. */
   onSendOcppCall?: (request: OcppCallRequest) => Promise<OcppCallOutcome>;
+  /** #1096: send an OCPP 2.1 SEND (message type 6); resolves once written,
+   *  rejects when refused. */
+  onSendOcppSend?: (request: OcppSendRequest) => Promise<OcppSendOutcome>;
   /** Schema 1.6 (#654): send a status notification (`notify` node). */
   onNotify?: (kind: NotifyKind, status: string, requestId?: number) => void;
   /**

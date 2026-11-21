@@ -79,18 +79,33 @@ describe("getOcppCallCatalog", () => {
 
   it("covers every station-initiated request of each JSON version", () => {
     // Everything with a request schema is either answered by the station
-    // (inbound registry) or sent by it (catalog). 2.1's
-    // NotifyPeriodicEventStream is an OCPP-J SEND, not a CALL, so it has no
-    // place in a CALL sender.
+    // (inbound registry), sent by it as a CALL (`actions`) or, for 2.1's
+    // NotifyPeriodicEventStream, sent as an OCPP-J SEND (`sendActions`, #1096).
     for (const { version, validators, isInbound } of JSON_VERSIONS) {
       const catalog = getOcppCallCatalog(version)!;
       const missing = Object.keys(validators).filter(
         (action) =>
           !isInbound(action) &&
           !catalog.isSupported(action) &&
-          action !== "NotifyPeriodicEventStream",
+          !catalog.isSendSupported(action),
       );
       expect(missing, version).toEqual([]);
+    }
+  });
+
+  it("lists NotifyPeriodicEventStream as a 2.1 SEND, never as a CALL (#1096)", () => {
+    const v21 = getOcppCallCatalog("OCPP-2.1")!;
+    expect(v21.sendActions).toEqual(["NotifyPeriodicEventStream"]);
+    expect(v21.isSendSupported("NotifyPeriodicEventStream")).toBe(true);
+    expect(v21.isSupported("NotifyPeriodicEventStream")).toBe(false);
+    expect(v21.isSendSupported("Heartbeat")).toBe(false);
+    for (const version of ["OCPP-1.6J", "OCPP-2.0.1"]) {
+      expect(getOcppCallCatalog(version)!.sendActions, version).toEqual([]);
+    }
+    for (const action of v21.sendActions) {
+      const payload = v21.defaultPayload(action);
+      expect(Object.keys(payload).length, action).toBeGreaterThan(0);
+      expect(v21.validate(action, payload), action).toBeNull();
     }
   });
 

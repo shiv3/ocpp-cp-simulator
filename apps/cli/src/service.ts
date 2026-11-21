@@ -32,6 +32,8 @@ import type {
   RawFrameRequest,
   CallResultErrorOutcome,
   CallResultErrorRequest,
+  OcppSendOutcome,
+  OcppSendRequest,
 } from "@ocpp-cp-simulator/core/cp/domain/types/OcppCall";
 import type {
   Get15118EVCertificateRequest,
@@ -1011,6 +1013,11 @@ export class CLIChargePointService {
   /** Expert OCPP call (#389); see `ChargePoint.sendOcppCall`. */
   sendOcppCall(request: OcppCallRequest): Promise<OcppCallOutcome> {
     return this._chargePoint.sendOcppCall(request);
+  }
+
+  /** OCPP 2.1 SEND (#1096); see `ChargePoint.sendOcppSend`. */
+  sendOcppSend(request: OcppSendRequest): Promise<OcppSendOutcome> {
+    return this._chargePoint.sendOcppSend(request);
   }
 
   /** Expert raw frame (#393); see `ChargePoint.sendRawFrame`. */

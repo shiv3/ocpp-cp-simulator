@@ -16,6 +16,10 @@ export enum OCPPMessageType {
   CALL = 2,
   CALLRESULT = 3,
   CALLERROR = 4,
+  /** OCPP 2.1 CALLRESULTERROR: a caller's answer to a CALLRESULT it cannot accept. */
+  CALLRESULTERROR = 5,
+  /** OCPP 2.1 SEND: an unconfirmed message, never answered. */
+  SEND = 6,
 }
 
 /**

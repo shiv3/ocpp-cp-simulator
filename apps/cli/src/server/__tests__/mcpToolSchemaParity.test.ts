@@ -321,6 +321,7 @@ describe("MCP curated tool schema parity (general, #299)", () => {
     { tool: "stop_transaction", method: "stop_transaction" },
     { tool: "authorize", method: "authorize" },
     { tool: "send_ocpp_call", method: "send_ocpp_call" },
+    { tool: "send_ocpp_send", method: "send_ocpp_send" },
     { tool: "send_raw_frame", method: "send_raw_frame" },
     { tool: "set_response_override", method: "set_response_override" },
     { tool: "clear_response_overrides", method: "clear_response_overrides" },

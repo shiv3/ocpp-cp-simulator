@@ -30,7 +30,7 @@ import { CallWaiters } from "./CallWaiters";
 import { ExpertCalls } from "./ExpertCalls";
 import {
   type OcppCallOutcome,
-  type OcppCallRequest,
+  type ResolvedOcppCallRequest,
 } from "../../domain/types/OcppCall";
 import {
   OcppCallNoAnswerError,
@@ -392,7 +392,7 @@ export class OCPPMessageHandler {
    *  but its answer goes to the caller, and to the result handlers only
    *  when `applyResponse` is set. */
   public async sendOcppCall(
-    originalRequest: OcppCallRequest,
+    originalRequest: ResolvedOcppCallRequest,
   ): Promise<OcppCallOutcome> {
     let request = originalRequest;
     // ChargePoint.sendOcppCall checked the action against the 1.6 catalog,

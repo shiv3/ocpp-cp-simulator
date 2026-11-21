@@ -214,6 +214,11 @@ function validateExportability(scenario: ScenarioJson): string[] {
         `responseOverride modes other than { status }, and "times" / "persistent" / "delayMs" (#1095), are not supported by export-k6 (node ${node.id}): the k6 runtime arms a one-shot status only`,
       );
     }
+    if (node.type === "ocppCall" && data.messageType === "send") {
+      problems.push(
+        `ocppCall messageType "send" (an OCPP 2.1 SEND, #1096) is not supported by export-k6 (node ${node.id}): the k6 runtime speaks OCPP 1.6 CALLs only`,
+      );
+    }
     if (node.type === "ocppCall" && containsFrom(data.payload)) {
       problems.push(
         `ocppCall payload uses "$from", which needs a CALL taken over by a csmsCallTrigger with behavior "replace"; export-k6 does not support it (node ${node.id})`,

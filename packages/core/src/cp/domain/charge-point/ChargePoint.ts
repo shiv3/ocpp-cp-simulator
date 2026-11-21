@@ -78,6 +78,8 @@ import {
 import {
   type OcppCallOutcome,
   type OcppCallRequest,
+  type OcppSendRequest,
+  type OcppSendOutcome,
   type RawFrameOutcome,
   type RawFrameRequest,
   type CallResultErrorRequest,
@@ -1317,6 +1319,14 @@ export class ChargePoint {
     request: CallResultErrorRequest,
   ): Promise<CallResultErrorOutcome> {
     return this._parts.messaging.sendCallResultError(request);
+  }
+
+  /**
+   * OCPP 2.1 SEND (message type 6), e.g. NotifyPeriodicEventStream: no answer
+   * is awaited. @see StationMessaging.sendOcppSend
+   */
+  sendOcppSend(request: OcppSendRequest): Promise<OcppSendOutcome> {
+    return this._parts.messaging.sendOcppSend(request);
   }
 
   /**

@@ -21,6 +21,8 @@ import type {
   RawFrameRequest,
   CallResultErrorOutcome,
   CallResultErrorRequest,
+  OcppSendOutcome,
+  OcppSendRequest,
 } from "@ocpp-cp-simulator/core/cp/domain/types/OcppCall";
 import type {
   Get15118EVCertificateRequest,
@@ -372,6 +374,13 @@ export class RegistryChargePointService implements ChargePointService {
     request: OcppCallRequest,
   ): Promise<OcppCallOutcome> {
     return this.requireService(id).sendOcppCall(request);
+  }
+
+  async sendOcppSend(
+    id: string,
+    request: OcppSendRequest,
+  ): Promise<OcppSendOutcome> {
+    return this.requireService(id).sendOcppSend(request);
   }
 
   async sendRawFrame(

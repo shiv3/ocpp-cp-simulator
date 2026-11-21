@@ -95,6 +95,31 @@ export async function executeOcppCall(
     ctx.fromScope(flow),
     `ocppCall(${action})`,
   ) as Record<string, unknown>;
+  if (data.messageType === "send") {
+    // #1096: an OCPP 2.1 SEND is never answered; written is all there is.
+    if (!ctx.callbacks.onSendOcppSend) {
+      ctx.callbacks.log?.(
+        "OCPP send: no onSendOcppSend callback wired",
+        "warn",
+      );
+      return;
+    }
+    const sent = ctx.callbacks.onSendOcppSend({
+      action,
+      payload,
+      skipValidation,
+    });
+    const outcome = await Promise.race([
+      sent,
+      flow.scope.ended.then(() => null),
+    ]);
+    if (outcome === null) {
+      sent.catch(() => undefined);
+      return;
+    }
+    ctx.callbacks.log?.(`OCPP send ${action} → ${outcome.sentFrame}`, "info");
+    return;
+  }
   const call = ctx.callbacks.onSendOcppCall({
     action,
     payload,

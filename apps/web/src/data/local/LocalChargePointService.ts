@@ -31,6 +31,8 @@ import type {
   RawFrameRequest,
   CallResultErrorOutcome,
   CallResultErrorRequest,
+  OcppSendOutcome,
+  OcppSendRequest,
 } from "@ocpp-cp-simulator/core/cp/domain/types/OcppCall";
 import type {
   Get15118EVCertificateRequest,
@@ -145,6 +147,7 @@ import {
   authorize,
   sendDataTransfer,
   sendOcppCall,
+  sendOcppSend,
   sendRawFrame,
   setResponseOverride,
   clearResponseOverrides,
@@ -554,6 +557,13 @@ export class LocalChargePointService implements ChargePointService {
     request: OcppCallRequest,
   ): Promise<OcppCallOutcome> {
     return sendOcppCall(this.localHost, id, request);
+  }
+
+  async sendOcppSend(
+    id: string,
+    request: OcppSendRequest,
+  ): Promise<OcppSendOutcome> {
+    return sendOcppSend(this.localHost, id, request);
   }
 
   async sendRawFrame(

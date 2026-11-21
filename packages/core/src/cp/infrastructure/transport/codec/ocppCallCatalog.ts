@@ -14,7 +14,10 @@ import { outgoingV21Warning } from "./validateV21";
  */
 export interface OcppCallCatalog {
   readonly actions: readonly string[];
+  /** OCPP 2.1 SEND actions (message type 6, no response); empty before 2.1. */
+  readonly sendActions: readonly string[];
   isSupported(action: string): boolean;
+  isSendSupported(action: string): boolean;
   /** The codec's outgoing warning: null when the payload is schema-valid. */
   validate(action: string, payload: unknown): string | null;
   defaultPayload(action: string): Record<string, unknown>;
@@ -70,7 +73,8 @@ const V201_ACTIONS = [
 ] as const;
 
 // 2.1 keeps every 2.0.1 station message and adds these. Its
-// NotifyPeriodicEventStream is an OCPP-J SEND (no response), not a CALL.
+// NotifyPeriodicEventStream is an OCPP-J SEND (no response), not a CALL: it is
+// in `V21_SEND_ACTIONS`.
 const V21_ACTIONS = [
   ...V201_ACTIONS,
   "BatterySwap",
@@ -86,16 +90,23 @@ const V21_ACTIONS = [
   "VatNumberValidation",
 ].sort();
 
+// Station-initiated SEND messages (RPC message type 6, 2.1 Part 2 FR.07).
+const V21_SEND_ACTIONS = ["NotifyPeriodicEventStream"] as const;
+
 function buildCatalog(
   actions: readonly string[],
+  sendActions: readonly string[],
   schemaMap: Record<string, object>,
   version: "V16" | "V201" | "V21",
   outgoingWarning: (action: string, payload: unknown) => string | null,
 ): OcppCallCatalog {
   const supported = new Set(actions);
+  const sendSupported = new Set(sendActions);
   return {
     actions,
+    sendActions,
     isSupported: (action) => supported.has(action),
+    isSendSupported: (action) => sendSupported.has(action),
     validate: outgoingWarning,
     defaultPayload: (action) => {
       const schema = schemaMap[requestSchemaKey(action, version)];
@@ -108,18 +119,21 @@ function buildCatalog(
 
 const V16_CATALOG = buildCatalog(
   V16_ACTIONS,
+  [],
   schemas.v16,
   "V16",
   outgoingV16Warning,
 );
 const V201_CATALOG = buildCatalog(
   V201_ACTIONS,
+  [],
   schemas.v201,
   "V201",
   outgoingV201Warning,
 );
 const V21_CATALOG = buildCatalog(
   V21_ACTIONS,
+  V21_SEND_ACTIONS,
   schemas.v21,
   "V21",
   outgoingV21Warning,

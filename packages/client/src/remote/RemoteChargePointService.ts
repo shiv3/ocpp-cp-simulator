@@ -32,6 +32,8 @@ import type {
   RawFrameRequest,
   CallResultErrorOutcome,
   CallResultErrorRequest,
+  OcppSendOutcome,
+  OcppSendRequest,
 } from "@ocpp-cp-simulator/core/cp/domain/types/OcppCall";
 import type {
   Get15118EVCertificateRequest,
@@ -365,6 +367,17 @@ export class RemoteChargePointService implements ChargePointService {
       "send_ocpp_call",
       request,
     )) as OcppCallOutcome;
+  }
+
+  async sendOcppSend(
+    id: string,
+    request: OcppSendRequest,
+  ): Promise<OcppSendOutcome> {
+    return (await this.runCpRpc(
+      id,
+      "send_ocpp_send",
+      request,
+    )) as OcppSendOutcome;
   }
 
   async sendRawFrame(

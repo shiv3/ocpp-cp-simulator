@@ -312,6 +312,11 @@ export async function handleJsonCommand(
       // admits exactly what the control plane admits.
       return ops.sendOcppCall(methodParams("send_ocpp_call", params));
 
+    case "send_ocpp_send":
+      // #1096: OCPP 2.1 SEND (message type 6); same schema as the control
+      // plane's.
+      return ops.sendOcppSend(methodParams("send_ocpp_send", params));
+
     case "send_raw_frame":
       // #393: same schema as the control plane's.
       return ops.sendRawFrame(methodParams("send_raw_frame", params));

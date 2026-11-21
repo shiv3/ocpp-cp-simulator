@@ -687,6 +687,7 @@ export function parseArgs(argv: string[]): CLIOptions {
     logFile: s.logFile,
     logMaxBytes: s.logMaxBytes,
     logRotateDaily: s.logRotateDaily,
+    logToStderr: s.logToStderr,
     logKeep: s.logKeep,
     shutdownStopTransactions: s.shutdownStopTransactions,
     shutdownWaitMs: s.shutdownWaitMs,

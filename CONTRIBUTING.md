@@ -2,7 +2,7 @@
 
 ## Setup
 
-Installing from source needs a GitHub token with `read:packages`: the [Open OCPP Trace SDK](docs/concepts/trace-format.md#reference-implementation) (`@open-ocpp-trace/*`) comes from GitHub Packages, which asks for one even for a public package (`bunfig.toml`, #886). With the GitHub CLI: `GITHUB_TOKEN=${GITHUB_TOKEN:-$(gh auth token)} bun install`. CI passes the workflow's own token; building the Docker image from source needs the same token as a build secret ([Docker image → Building locally](docs/entities/docker-image.md#building-locally)). Installing the released CLI (tarball or npm) needs none.
+`bun install` works without any token: the [Open OCPP Trace SDK](docs/concepts/trace-format.md#reference-implementation) (`@open-ocpp-trace/*`) comes from GitHub Packages, which asks for a token even for a public package, so it is an `optionalDependencies` entry and a failed fetch is only a warning (`bunfig.toml`, #886). Without it the CLI, daemon, JSON Lines mode and every scenario still run from source; only `--trace-output`, `analyze`, the web console build and the tests and type checks that import the SDK need it, and the CLI says so when asked for one. To install it, use a GitHub token with `read:packages`: `GITHUB_TOKEN=${GITHUB_TOKEN:-$(gh auth token)} bun install`. CI passes the workflow's own token; building the Docker image from source needs the same token as a build secret ([Docker image → Building locally](docs/entities/docker-image.md#building-locally)). Installing the released CLI (tarball or npm) needs none.
 
 ## Checks
 

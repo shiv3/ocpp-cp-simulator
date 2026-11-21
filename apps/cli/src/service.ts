@@ -67,7 +67,7 @@ import {
 import { soapDialectForVersion } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/soap/dialect";
 import { OCPPSoapServer } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/soap/OCPPSoapServer";
 import type { ResolvedNetworkSimConfig } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
-import { getGlobalTraceWriter } from "./trace/TraceWriter";
+import { getGlobalTraceWriter } from "./trace/globalTraceWriter";
 import {
   splitStopReason,
   type MeterReadingContext,

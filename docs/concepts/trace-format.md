@@ -15,7 +15,7 @@ related:
   - log-format.md
   - scenario-format.md
   - ../entities/cli.md
-updated: 2026-11-15
+updated: 2026-11-21
 ---
 
 # OCPP Trace Format (v1.1)
@@ -56,7 +56,7 @@ uses it instead of its own copy:
 - `@open-ocpp-trace/jsonl` — `serializeRecord` (writer) and `readRecords`
   (reader).
 
-Both are pinned to exact versions (`0.1.0`) in the root `devDependencies`
+Both are pinned to exact versions (`0.1.0`) in the root `optionalDependencies`, so `bun install` works without a token (the CLI loads them lazily, only for `--trace-output` and `analyze`)
 and installed from GitHub Packages, which asks for a token even for a public
 package (`bunfig.toml`; see [CONTRIBUTING.md](../../CONTRIBUTING.md)).
 The CLI bundle and the web console inline them, so the published

@@ -22,6 +22,7 @@ import {
   type RpcMethod,
 } from "@ocpp-cp-simulator/contracts/index";
 import { toJsonResponse, toJsonEvent } from "./output";
+import { writeLine } from "./jsonLines";
 import type { JsonCommand } from "./types";
 import type {
   ScenarioDefinition,
@@ -50,11 +51,6 @@ import {
 const VALID_SCENARIO_MODES: ReadonlyArray<ScenarioMode> = SCENARIO_MODES;
 
 const VALID_STATUSES = new Set(Object.values(OCPPStatus));
-
-// Only `console` writes stdout here: mixed with process.stdout, Bun cuts large lines (#1076).
-function writeLine(obj: unknown): void {
-  console.log(JSON.stringify(obj));
-}
 
 export async function startJsonMode(
   service: SingleCpProcessTarget,

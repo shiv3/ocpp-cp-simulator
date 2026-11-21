@@ -84,6 +84,8 @@ Options:
                            giving up. -1 = unlimited (default), 0 = never
                            reconnect. Giving up is a gave_up entry in the
                            operational timeline.
+  --no-reconnect           Never reconnect after a connection loss; the same as
+                           --reconnect-max-attempts 0.
   --reconnect-mode <exponential|fixed>
                            exponential (default) doubles the delay up to
                            --reconnect-max-delay-ms; fixed waits
@@ -224,6 +226,10 @@ Options:
                            --log-file lines below it.
   --log-file <path>        Also append console log lines to this file.
   --log-max-size <size>    Rotate --log-file past this size (10m, 512k, bytes).
+  --log-to-stderr          With --json: print the simulator's log lines on stderr
+                           so stdout is pure JSON Lines. Without it they share
+                           stdout with the JSON lines (the open-ocpp-tck
+                           contract). Applies to the wire lines too.
   --log-rotate-daily       Rotate --log-file when the local date changes.
   --log-keep <n>           Rotated files to keep (default 5).
   --shutdown-stop-transactions

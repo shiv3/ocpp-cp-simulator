@@ -21,6 +21,10 @@ export function parseConnectionFlag(
       });
       cur.i++;
       break;
+    case "--no-reconnect":
+      // #1089: the same as --reconnect-max-attempts 0.
+      s.reconnect.maxAttempts = 0;
+      break;
     case "--reconnect-mode": {
       const mode = requireFlagValue(arg, next);
       if (mode !== "exponential" && mode !== "fixed") {

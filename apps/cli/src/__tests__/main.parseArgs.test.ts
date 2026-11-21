@@ -548,6 +548,12 @@ describe("parseArgs OCPP 1.6 security flags", () => {
     });
   });
 
+  it("--no-reconnect is --reconnect-max-attempts 0 (#1089)", () => {
+    const result = runParseArgs([...WS_BASE, "--no-reconnect"]);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).transport.reconnect.maxAttempts).toBe(0);
+  });
+
   it("collects --ws-* flags into transport.ws (#611)", () => {
     const ok = runParseArgs([
       ...WS_BASE,

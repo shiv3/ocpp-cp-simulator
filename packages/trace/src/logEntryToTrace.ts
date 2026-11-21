@@ -11,12 +11,12 @@
  */
 
 import {
-  SCHEMA_VERSION,
   type Direction,
   type TraceError,
   type TraceRecord,
   type Transport,
 } from "@open-ocpp-trace/core";
+import { TRACE_SCHEMA_VERSION as SCHEMA_VERSION } from "./traceSchemaVersion";
 import { payloadConnectorId } from "./connectorId";
 import { TraceCorrelator } from "./TraceCorrelator";
 

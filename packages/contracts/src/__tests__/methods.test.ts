@@ -36,6 +36,8 @@ const JSONMODE_COMMAND_IDS = [
   "send_ocpp_call",
   "send_ocpp_send",
   "send_raw_frame",
+  "wait_for",
+  "wait_quiet",
   "set_response_override",
   "clear_response_overrides",
   "send_call_result_error",

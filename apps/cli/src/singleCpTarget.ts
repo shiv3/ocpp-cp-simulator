@@ -30,6 +30,12 @@ import type {
   AuthorizationCacheView,
 } from "@ocpp-cp-simulator/core/cp/domain/auth/AuthorizationCacheSeed";
 import type { CLIChargePointService } from "./service";
+import type {
+  WaitForRequest,
+  WaitForResult,
+  WaitQuietRequest,
+  WaitQuietResult,
+} from "./service/waits";
 import {
   defaultAutoTrafficConfig,
   type AutoTrafficConfig,
@@ -67,6 +73,19 @@ import type {
   StopTransactionCommandOptions,
   TransactionUpdateOptions,
 } from "@ocpp-cp-simulator/core/cp/domain/connector/Transaction";
+
+interface WaitCapableService {
+  waitFor(id: string, request: WaitForRequest): Promise<WaitForResult>;
+  waitQuiet(id: string, request: WaitQuietRequest): Promise<WaitQuietResult>;
+}
+
+function requireWaits(service: ChargePointService): WaitCapableService {
+  const candidate = service as Partial<WaitCapableService>;
+  if (!candidate.waitFor || !candidate.waitQuiet) {
+    throw new Error("wait_for / wait_quiet need a daemon-backed charge point");
+  }
+  return candidate as WaitCapableService;
+}
 
 export interface FacadeSingleCpTarget {
   readonly chargePointService: ChargePointService;
@@ -130,6 +149,10 @@ export interface SingleCpCommandOps {
   sendOcppCall(request: OcppCallRequest): Promise<OcppCallOutcome>;
   sendOcppSend(request: OcppSendRequest): Promise<OcppSendOutcome>;
   sendRawFrame(request: RawFrameRequest): Promise<RawFrameOutcome>;
+  /** #1090: block until an event or scenario state matches. */
+  waitFor(request: WaitForRequest): Promise<WaitForResult>;
+  /** #1091: resolve when the wire is quiet. */
+  waitQuiet(request: WaitQuietRequest): Promise<WaitQuietResult>;
   setResponseOverride(
     request: ResponseOverrideRequest,
   ): Promise<{ action: string; mode: string }>;
@@ -345,6 +368,8 @@ function legacyCommandOps(service: CLIChargePointService): SingleCpCommandOps {
     sendOcppCall: (request) => service.sendOcppCall(request),
     sendOcppSend: (request) => service.sendOcppSend(request),
     sendRawFrame: (request) => service.sendRawFrame(request),
+    waitFor: (request) => service.waitFor(request),
+    waitQuiet: (request) => service.waitQuiet(request),
     setResponseOverride: (request) => service.setResponseOverride(request),
     clearResponseOverrides: (action) => service.clearResponseOverrides(action),
     sendCallResultError: (request) => service.sendCallResultError(request),
@@ -516,6 +541,10 @@ function facadeCommandOps(target: FacadeSingleCpTarget): SingleCpCommandOps {
     sendOcppCall: (request) => service.sendOcppCall(cpId, request),
     sendOcppSend: (request) => service.sendOcppSend(cpId, request),
     sendRawFrame: (request) => service.sendRawFrame(cpId, request),
+    // Only the daemon's registry service implements the waits (#1090, #1091);
+    // they are not part of the web console's ChargePointService port.
+    waitFor: (request) => requireWaits(service).waitFor(cpId, request),
+    waitQuiet: (request) => requireWaits(service).waitQuiet(cpId, request),
     setResponseOverride: (request) =>
       service.setResponseOverride(cpId, request),
     clearResponseOverrides: (action) =>

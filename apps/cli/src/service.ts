@@ -67,6 +67,14 @@ import {
 import { soapDialectForVersion } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/soap/dialect";
 import { OCPPSoapServer } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/soap/OCPPSoapServer";
 import type { ResolvedNetworkSimConfig } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
+import {
+  waitFor,
+  waitQuiet,
+  type WaitForRequest,
+  type WaitForResult,
+  type WaitQuietRequest,
+  type WaitQuietResult,
+} from "./service/waits";
 import { getGlobalTraceWriter } from "./trace/globalTraceWriter";
 import { processSimulationOptions } from "./timeScale";
 import {
@@ -611,6 +619,23 @@ export class CLIChargePointService {
     // The standalone runtime restores no connector runtime: settle now.
     service.reconcileChargingSessions();
     return service;
+  }
+
+  /** Block until a CLI event or a scenario state matches (#1090). */
+  waitFor(request: WaitForRequest): Promise<WaitForResult> {
+    return waitFor(
+      {
+        onEvent: (handler) => this.onEvent(handler),
+        readScenarioStatus: (connectorId, scenarioId) =>
+          this.getScenarioStatus(connectorId, scenarioId),
+      },
+      request,
+    );
+  }
+
+  /** Resolve when the wire is quiet (#1091). */
+  waitQuiet(request: WaitQuietRequest): Promise<WaitQuietResult> {
+    return waitQuiet(this._chargePoint, request);
   }
 
   onEvent(handler: EventHandler): () => void {

@@ -1,3 +1,9 @@
+import {
+  type WaitForRequest,
+  type WaitForResult,
+  type WaitQuietRequest,
+  type WaitQuietResult,
+} from "../service/waits";
 import type { ResponseOverrideRequest } from "@ocpp-cp-simulator/core/cp/domain/charge-point/responseOverrideRequest";
 import type { CellularPolicySet } from "@ocpp-cp-simulator/core/cp/domain/modem/cellularLink";
 import type { ModemCommand as ModemCommandInput } from "@ocpp-cp-simulator/contracts/modem";
@@ -381,6 +387,19 @@ export class RegistryChargePointService implements ChargePointService {
     request: OcppSendRequest,
   ): Promise<OcppSendOutcome> {
     return this.requireService(id).sendOcppSend(request);
+  }
+
+  /** `wait_for` (#1090). */
+  async waitFor(id: string, request: WaitForRequest): Promise<WaitForResult> {
+    return this.requireService(id).waitFor(request);
+  }
+
+  /** `wait_quiet` (#1091). */
+  async waitQuiet(
+    id: string,
+    request: WaitQuietRequest,
+  ): Promise<WaitQuietResult> {
+    return this.requireService(id).waitQuiet(request);
   }
 
   async sendRawFrame(

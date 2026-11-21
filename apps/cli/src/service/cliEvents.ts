@@ -7,7 +7,10 @@ import type { ChargingSession } from "@ocpp-cp-simulator/core/cp/domain/session/
 import type { EVSettings } from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
 import type { ActiveChargingProfile } from "@ocpp-cp-simulator/core/cp/domain/connector/Connector";
 import type { AutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
-import type { ScenarioWaitIntervention } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import type {
+  ScenarioExpectation,
+  ScenarioWaitIntervention,
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import type { StateHistoryEntry } from "@ocpp-cp-simulator/core/cp/domain/services/StateSnapshot";
 import type { TimelineEntry } from "@ocpp-cp-simulator/core/cp/application/services/OperationalTimeline";
 
@@ -97,6 +100,21 @@ export type CLIEvent =
         readonly scenarioId: string;
         readonly error: string;
         readonly runId: string;
+      };
+    }
+  | {
+      // #1090: the scenario's execution state changed (idle, running,
+      // waiting, paused, completed, error, ...). `nodeId` is the current
+      // node; `expectation` describes the condition a parked wait awaits.
+      readonly event: "scenario_state_changed";
+      readonly data: {
+        readonly connectorId: number;
+        readonly scenarioId: string;
+        readonly runId: string;
+        readonly state: string;
+        readonly nodeId: string | null;
+        readonly expectation: ScenarioExpectation | null;
+        readonly error?: string;
       };
     }
   | {

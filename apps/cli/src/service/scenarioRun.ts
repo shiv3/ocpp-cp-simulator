@@ -258,6 +258,20 @@ export function runScenario(
     connector,
     hooks: {
       onStateChange: (context) => {
+        // #1090: every state change, with the node and, while parked, the
+        // expectation (action, target status, ...), so a driver can wait on it.
+        host.emit({
+          event: "scenario_state_changed",
+          data: {
+            connectorId,
+            scenarioId,
+            runId,
+            state: context.state,
+            nodeId: context.currentNodeId,
+            expectation: context.expectation ?? null,
+            ...(context.error !== undefined ? { error: context.error } : {}),
+          },
+        });
         if (context.state === "completed") {
           host.emit({
             event: "scenario_completed",

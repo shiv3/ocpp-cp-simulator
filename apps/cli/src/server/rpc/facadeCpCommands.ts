@@ -183,6 +183,20 @@ export async function dispatchFacadeCpCommand(
         ),
       );
     }
+    case "wait_for": {
+      const { params } = call;
+      return handled(
+        await runFacadeOperation(() => chargePointService.waitFor(id, params)),
+      );
+    }
+    case "wait_quiet": {
+      const { params } = call;
+      return handled(
+        await runFacadeOperation(() =>
+          chargePointService.waitQuiet(id, params),
+        ),
+      );
+    }
     case "send_raw_frame": {
       const { params } = call;
       // #393: no reply is a result too (reply null), as is a close.

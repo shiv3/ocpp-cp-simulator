@@ -25,6 +25,7 @@ export { CallWaiters } from "./CallWaiters";
 export { platformClock, type RpcClock } from "./platformClock";
 export {
   OCPP16_RPC_DIALECT,
+  OCPP21_RPC_DIALECT,
   OCPP2X_RPC_DIALECT,
   type RpcDialect,
 } from "./dialects";
@@ -43,7 +44,9 @@ export {
   RpcHandlerError,
   RpcInvalidResponseError,
   RpcTimeoutError,
+  RpcUnsupportedMessageTypeError,
   type RpcEndpointOptions,
   type RpcHandler,
   type RpcProtocolProblem,
+  type RpcSendHandler,
 } from "./RpcEndpoint";

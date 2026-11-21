@@ -5,8 +5,8 @@ import {
 } from "@ocpp-cp-simulator/ocpp/validate";
 import { violationKind, type ViolationKind } from "./violationKind";
 
-/** What the endpoint validates: an inbound CALL's request or an inbound
- *  CALLRESULT's response, for the action of the CALL. */
+/** What the endpoint validates: an inbound CALL's or SEND's request, or an
+ *  inbound CALLRESULT's response, for the action of the CALL. */
 export interface RpcValidationTarget {
   readonly direction: "request" | "response";
   readonly action: string;

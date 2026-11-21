@@ -2,12 +2,17 @@ import { CallWaiters } from "./CallWaiters";
 import { platformClock, type RpcClock } from "./platformClock";
 import type { RpcDialect } from "./dialects";
 import {
+  OCPPMessageType,
   decodeFrame,
   encodeCall,
   encodeCallError,
   encodeCallResult,
+  encodeCallResultError,
+  encodeSend,
   type RpcCallFrame,
+  type RpcCallResultErrorFrame,
   type RpcDecodeErrorReason,
+  type RpcSendFrame,
 } from "./frames";
 import type { RpcValidator } from "./validation";
 
@@ -17,13 +22,30 @@ export type RpcHandler = (
   context: { readonly messageId: string; readonly action: string },
 ) => unknown;
 
+/** A SEND from the peer (OCPP 2.1). It is never answered, so the handler's
+ *  return value is ignored. */
+export type RpcSendHandler = (
+  payload: unknown,
+  context: { readonly messageId: string; readonly action: string },
+) => void | Promise<void>;
+
 /** A frame the endpoint could not use, never answered (see #978: the
- *  spec-conformant replies are #1060), or an answer `send` could not write. */
+ *  spec-conformant replies are #1060), an answer `send` could not write, or
+ *  a SEND that went nowhere: no handler, an invalid payload or a failed
+ *  handler. A SEND is never answered (OCPP 2.1 Part 4 §4.2.4). */
 export interface RpcProtocolProblem {
   readonly reason:
-    RpcDecodeErrorReason | "unmatched-response" | "reply-send-failed";
+    | RpcDecodeErrorReason
+    | "unmatched-response"
+    | "reply-send-failed"
+    | "unhandled-send"
+    | "invalid-send"
+    | "send-handler-failed";
   readonly raw: string;
   readonly messageId?: string;
+  /** The `RpcViolation` of an `invalid-send`, or what the handler of a
+   *  `send-handler-failed` threw. */
+  readonly cause?: unknown;
 }
 
 export interface RpcEndpointOptions {
@@ -44,6 +66,10 @@ export interface RpcEndpointOptions {
   readonly validate?: RpcValidator;
   /** Told about every malformed or unmatched frame. */
   readonly onProtocolError?: (problem: RpcProtocolProblem) => void;
+  /** OCPP 2.1: the peer could not process a CALLRESULT this side sent. Its
+   *  message id is the one of the peer's CALL, so no pending call of this
+   *  side is touched. */
+  readonly onCallResultError?: (frame: RpcCallResultErrorFrame) => void;
 }
 
 const DEFAULT_CALL_TIMEOUT_MS = 30_000;
@@ -100,6 +126,16 @@ export class RpcTimeoutError extends Error {
   }
 }
 
+/** A SEND or a CALLRESULTERROR on a version without them. */
+export class RpcUnsupportedMessageTypeError extends Error {
+  constructor(readonly messageType: OCPPMessageType) {
+    super(
+      `${OCPPMessageType[messageType]} is an OCPP 2.1 message type; this endpoint's dialect has none`,
+    );
+    this.name = "RpcUnsupportedMessageTypeError";
+  }
+}
+
 /** The endpoint was closed before the call was answered. */
 export class RpcClosedError extends Error {
   constructor(reason: string) {
@@ -116,6 +152,7 @@ export class RpcClosedError extends Error {
  */
 export class RpcEndpoint {
   private readonly handlers = new Map<string, RpcHandler>();
+  private readonly sendHandlers = new Map<string, RpcSendHandler>();
   private readonly actions = new Map<string, string>();
   private readonly waiters: CallWaiters<unknown>;
   private readonly clock: RpcClock;
@@ -141,6 +178,12 @@ export class RpcEndpoint {
     this.handlers.set(action, handler);
   }
 
+  /** Take SENDs for `action` with `handler` (OCPP 2.1); replaces an earlier
+   *  one. Separate from `handle`: a CALL handler never sees a SEND. */
+  handleSend(action: string, handler: RpcSendHandler): void {
+    this.sendHandlers.set(action, handler);
+  }
+
   /** Send a CALL; resolves with the CALLRESULT payload. */
   call(action: string, payload: unknown): Promise<unknown> {
     if (this.closed !== null)
@@ -160,11 +203,50 @@ export class RpcEndpoint {
     return answer;
   }
 
+  /**
+   * Send an OCPP 2.1 SEND, never answered (Part 4 §4.2.4), and return its
+   * message id. The id comes from `nextMessageId`, shared with CALLs (§4.1.2);
+   * nothing waits for it, so it may go while a CALL is in flight. Throws
+   * `RpcClosedError` after `close()`, `RpcUnsupportedMessageTypeError` on a
+   * dialect without the 2.1 types, or what `send` threw.
+   */
+  send(action: string, payload: unknown): string {
+    this.assertOcpp21(OCPPMessageType.SEND);
+    const id = this.options.nextMessageId();
+    this.options.send(encodeSend(id, action, payload));
+    return id;
+  }
+
+  /**
+   * Answer a CALLRESULT this side could not process with an OCPP 2.1
+   * CALLRESULTERROR, under that CALLRESULT's message id (Part 4 §4.2.3).
+   * Never sent on its own: a CALLRESULT that fails validation only rejects
+   * the call, whose `RpcInvalidResponseError` carries the code to send.
+   * Throws as `send` does.
+   */
+  sendCallResultError(
+    messageId: string,
+    errorCode: string,
+    errorDescription: string,
+    errorDetails?: object,
+  ): void {
+    this.assertOcpp21(OCPPMessageType.CALLRESULTERROR);
+    this.options.send(
+      encodeCallResultError(
+        messageId,
+        errorCode,
+        errorDescription,
+        errorDetails,
+      ),
+    );
+  }
+
   /** Take one text frame from the peer. */
   receive(raw: string): void {
     if (this.closed !== null) return;
-    // Types 2-4 only until the endpoint speaks OCPP 2.1.
-    const frame = decodeFrame(raw, { ocpp21: false });
+    const frame = decodeFrame(raw, {
+      ocpp21: this.options.dialect.ocpp21MessageTypes,
+    });
     switch (frame.kind) {
       case "invalid":
         this.problem(frame);
@@ -209,6 +291,16 @@ export class RpcEndpoint {
           ),
         );
         return;
+      }
+      case "send":
+        void this.dispatchSend(frame, raw);
+        return;
+      case "callResultError":
+        this.options.onCallResultError?.(frame);
+        return;
+      default: {
+        const unexpected: never = frame;
+        return unexpected;
       }
     }
   }
@@ -262,6 +354,47 @@ export class RpcEndpoint {
     this.reply(messageId, answer);
   }
 
+  /** Run the SEND handler; whatever happens, nothing is sent back. */
+  private async dispatchSend(frame: RpcSendFrame, raw: string): Promise<void> {
+    const { messageId, action, payload } = frame;
+    const handler = this.sendHandlers.get(action);
+    if (!handler) {
+      this.problem({ reason: "unhandled-send", raw, messageId });
+      return;
+    }
+    const violation = this.options.validate?.({
+      direction: "request",
+      action,
+      payload,
+    });
+    if (violation) {
+      this.problem({
+        reason: "invalid-send",
+        raw,
+        messageId,
+        cause: violation,
+      });
+      return;
+    }
+    try {
+      await handler(payload, { messageId, action });
+    } catch (error) {
+      this.problem({
+        reason: "send-handler-failed",
+        raw,
+        messageId,
+        cause: error,
+      });
+    }
+  }
+
+  /** Refuse a 2.1 message type when closed or on a dialect without it. */
+  private assertOcpp21(messageType: OCPPMessageType): void {
+    if (this.closed !== null) throw new RpcClosedError(this.closed);
+    if (!this.options.dialect.ocpp21MessageTypes)
+      throw new RpcUnsupportedMessageTypeError(messageType);
+  }
+
   /** The CALLERROR for a handler that threw: its own for an
    *  `RpcHandlerError` whose details can be encoded, else `InternalError`. */
   private failureFrame(
@@ -311,14 +444,12 @@ export class RpcEndpoint {
   }
 
   private problem(problem: RpcProtocolProblem): void {
-    this.options.onProtocolError?.(
-      problem.messageId === undefined
-        ? { reason: problem.reason, raw: problem.raw }
-        : {
-            reason: problem.reason,
-            raw: problem.raw,
-            messageId: problem.messageId,
-          },
-    );
+    const { reason, raw, messageId, cause } = problem;
+    this.options.onProtocolError?.({
+      reason,
+      raw,
+      ...(messageId === undefined ? {} : { messageId }),
+      ...(cause === undefined ? {} : { cause }),
+    });
   }
 }

@@ -5,14 +5,18 @@ import { describe, expect, it } from "vitest";
 
 import {
   OCPP16_RPC_DIALECT,
+  OCPP21_RPC_DIALECT,
   OCPP2X_RPC_DIALECT,
+  OCPPMessageType,
   RpcCallError,
   RpcClosedError,
   RpcEndpoint,
   RpcHandlerError,
   RpcInvalidResponseError,
   RpcTimeoutError,
+  RpcUnsupportedMessageTypeError,
   ocppSchemaValidator,
+  type RpcCallResultErrorFrame,
   type RpcClock,
   type RpcDialect,
   type RpcEndpointOptions,
@@ -428,5 +432,279 @@ describe("RpcEndpoint malformed and unexpected frames", () => {
         messageId: "zz",
       },
     ]);
+  });
+});
+
+const STREAM = {
+  id: 1,
+  pending: 0,
+  basetime: CURRENT_TIME,
+  data: [{ t: 0, v: "230" }],
+};
+
+/** Settles to "pending" while `promise` has not settled yet. */
+const stateOf = (promise: Promise<unknown>): Promise<unknown> =>
+  Promise.race([
+    promise.then(
+      (value) => ({ resolved: value }),
+      (error: unknown) => ({ rejected: error }),
+    ),
+    flush().then(() => "pending"),
+  ]);
+
+describe("RpcEndpoint OCPP 2.1 SEND", () => {
+  it("sends a SEND under the next message id while a CALL is in flight, and the peer never answers it", async () => {
+    const { cs, csms } = pair(OCPP21_RPC_DIALECT, {
+      validate: ocppSchemaValidator("2.1"),
+    });
+    const streamed: unknown[] = [];
+    csms.endpoint.handleSend("NotifyPeriodicEventStream", (payload, ctx) => {
+      streamed.push({ payload, ctx });
+    });
+    let answerHeartbeat: (value: unknown) => void = () => {};
+    csms.endpoint.handle(
+      "Heartbeat",
+      () => new Promise((resolve) => (answerHeartbeat = resolve)),
+    );
+
+    const heartbeat = cs.endpoint.call("Heartbeat", {});
+    const id = cs.endpoint.send("NotifyPeriodicEventStream", STREAM);
+    await flush();
+    answerHeartbeat({ currentTime: CURRENT_TIME });
+
+    expect(id).toBe("cs-2");
+    await expect(heartbeat).resolves.toEqual({ currentTime: CURRENT_TIME });
+    expect(cs.sent).toEqual([
+      '[2,"cs-1","Heartbeat",{}]',
+      `[6,"cs-2","NotifyPeriodicEventStream",{"id":1,"pending":0,"basetime":"${CURRENT_TIME}","data":[{"t":0,"v":"230"}]}]`,
+    ]);
+    expect(streamed).toEqual([
+      {
+        payload: STREAM,
+        ctx: { messageId: "cs-2", action: "NotifyPeriodicEventStream" },
+      },
+    ]);
+    // Only the Heartbeat is answered (Part 4 §4.2.4).
+    expect(csms.sent).toEqual([`[3,"cs-1",{"currentTime":"${CURRENT_TIME}"}]`]);
+    expect([...cs.problems, ...csms.problems]).toEqual([]);
+  });
+
+  const failure = new Error("handler failed");
+  it.each([
+    ["unhandled-send", undefined, STREAM, undefined],
+    [
+      "invalid-send",
+      () => {},
+      { ...STREAM, data: [] },
+      expect.objectContaining({ kind: expect.any(String) }),
+    ],
+    [
+      "send-handler-failed",
+      () => {
+        throw failure;
+      },
+      STREAM,
+      failure,
+    ],
+    [
+      "send-handler-failed",
+      async () => {
+        await Promise.resolve();
+        throw failure;
+      },
+      STREAM,
+      failure,
+    ],
+  ] as const)(
+    "never answers a SEND: %s is only reported",
+    async (reason, handler, payload, cause) => {
+      const { csms } = pair(OCPP21_RPC_DIALECT, {
+        validate: ocppSchemaValidator("2.1"),
+      });
+      if (handler)
+        csms.endpoint.handleSend("NotifyPeriodicEventStream", handler);
+      const raw = JSON.stringify([
+        6,
+        "cs-9",
+        "NotifyPeriodicEventStream",
+        payload,
+      ]);
+      csms.endpoint.receive(raw);
+      await flush();
+      expect(csms.sent).toEqual([]);
+      expect(csms.problems).toEqual([
+        {
+          reason,
+          raw,
+          messageId: "cs-9",
+          ...(cause === undefined ? {} : { cause }),
+        },
+      ]);
+    },
+  );
+
+  it("does not run a CALL handler for a SEND of the same action", async () => {
+    const { csms } = pair(OCPP21_RPC_DIALECT);
+    let ran = 0;
+    csms.endpoint.handle("Heartbeat", () => {
+      ran++;
+      return {};
+    });
+    csms.endpoint.receive('[6,"cs-9","Heartbeat",{}]');
+    await flush();
+    expect(ran).toBe(0);
+    expect(csms.sent).toEqual([]);
+    expect(csms.problems).toMatchObject([{ reason: "unhandled-send" }]);
+  });
+
+  it("lets the error of the injected send through", () => {
+    const failure = new Error("socket closed");
+    const { cs } = pair(OCPP21_RPC_DIALECT, {
+      send: () => {
+        throw failure;
+      },
+    });
+    expect(() => cs.endpoint.send("NotifyPeriodicEventStream", STREAM)).toThrow(
+      failure,
+    );
+    expect(() =>
+      cs.endpoint.sendCallResultError("csms-1", "FormatViolation", ""),
+    ).toThrow(failure);
+  });
+});
+
+describe("RpcEndpoint OCPP 2.1 CALLRESULTERROR", () => {
+  it("reports an inbound CALLRESULTERROR and leaves a pending call with the same id alone", async () => {
+    const reports: RpcCallResultErrorFrame[] = [];
+    const { cs, csms } = pair(OCPP21_RPC_DIALECT, {
+      onCallResultError: (frame) => reports.push(frame),
+    });
+    let answerHeartbeat: (value: unknown) => void = () => {};
+    csms.endpoint.handle(
+      "Heartbeat",
+      () => new Promise((resolve) => (answerHeartbeat = resolve)),
+    );
+    const heartbeat = cs.endpoint.call("Heartbeat", {});
+    await flush();
+
+    // The id names a CALL the peer sent, from the peer's own id space; it
+    // happens to equal the id of this side's pending call.
+    cs.endpoint.receive('[5,"cs-1","FormatViolation","bad",{"x":1}]');
+
+    expect(reports).toEqual([
+      {
+        kind: "callResultError",
+        messageId: "cs-1",
+        errorCode: "FormatViolation",
+        errorDescription: "bad",
+        errorDetails: { x: 1 },
+      },
+    ]);
+    expect(await stateOf(heartbeat)).toBe("pending");
+    answerHeartbeat({ currentTime: CURRENT_TIME });
+    await expect(heartbeat).resolves.toEqual({ currentTime: CURRENT_TIME });
+    expect(cs.problems).toEqual([]);
+  });
+
+  it("answers an invalid CALLRESULT only when the caller asks, with the code the rejection carries", async () => {
+    const reports: RpcCallResultErrorFrame[] = [];
+    const { cs, csms } = pair(OCPP21_RPC_DIALECT, {
+      validate: ocppSchemaValidator("2.1"),
+      onCallResultError: (frame) => reports.push(frame),
+    });
+    csms.endpoint.handle("Heartbeat", () => ({}));
+    const error = await cs.endpoint
+      .call("Heartbeat", {})
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(RpcInvalidResponseError);
+    // Nothing goes back on its own (decided on #1066).
+    expect(cs.sent).toEqual(['[2,"cs-1","Heartbeat",{}]']);
+
+    const invalid = error as RpcInvalidResponseError;
+    cs.endpoint.sendCallResultError(
+      invalid.messageId,
+      invalid.errorCode,
+      "currentTime is required",
+    );
+    await flush();
+
+    expect(cs.sent.at(-1)).toBe(
+      '[5,"cs-1","OccurrenceConstraintViolation","currentTime is required",{}]',
+    );
+    expect(reports).toEqual([
+      {
+        kind: "callResultError",
+        messageId: "cs-1",
+        errorCode: "OccurrenceConstraintViolation",
+        errorDescription: "currentTime is required",
+        errorDetails: {},
+      },
+    ]);
+  });
+});
+
+describe("RpcEndpoint OCPP 2.1 message types elsewhere", () => {
+  it.each([
+    ["1.6", OCPP16_RPC_DIALECT],
+    ["2.0.1", OCPP2X_RPC_DIALECT],
+  ] as const)(
+    "refuses to write a SEND or a CALLRESULTERROR on %s, before taking a message id",
+    (_version, dialect) => {
+      let ids = 0;
+      const { cs } = pair(dialect, { nextMessageId: () => `id-${++ids}` });
+      const send = () => cs.endpoint.send("NotifyPeriodicEventStream", STREAM);
+      const callResultError = () =>
+        cs.endpoint.sendCallResultError("csms-1", "FormatViolation", "");
+      expect(send).toThrow(RpcUnsupportedMessageTypeError);
+      expect(send).toThrow(
+        expect.objectContaining({ messageType: OCPPMessageType.SEND }),
+      );
+      expect(callResultError).toThrow(
+        expect.objectContaining({
+          messageType: OCPPMessageType.CALLRESULTERROR,
+        }),
+      );
+      expect(ids).toBe(0);
+      expect(cs.sent).toEqual([]);
+    },
+  );
+
+  it.each([
+    ["1.6", '[6,"m1","NotifyPeriodicEventStream",{}]', OCPP16_RPC_DIALECT],
+    ["1.6", '[5,"m1","FormatViolation","bad",{}]', OCPP16_RPC_DIALECT],
+    ["2.0.1", '[6,"m1","NotifyPeriodicEventStream",{}]', OCPP2X_RPC_DIALECT],
+    ["2.0.1", '[5,"m1","FormatViolation","bad",{}]', OCPP2X_RPC_DIALECT],
+  ] as const)(
+    "treats an inbound %s frame %s as an unknown message type, unanswered",
+    async (_version, raw, dialect) => {
+      const reports: RpcCallResultErrorFrame[] = [];
+      const { cs } = pair(dialect, {
+        onCallResultError: (frame) => reports.push(frame),
+      });
+      let ran = 0;
+      cs.endpoint.handleSend("NotifyPeriodicEventStream", () => {
+        ran++;
+      });
+      cs.endpoint.receive(raw);
+      await flush();
+      expect(cs.problems).toEqual([
+        { reason: "unknown-message-type", raw, messageId: "m1" },
+      ]);
+      expect(cs.sent).toEqual([]);
+      expect(ran).toBe(0);
+      expect(reports).toEqual([]);
+    },
+  );
+
+  it("refuses both after close() on 2.1", () => {
+    const { cs } = pair(OCPP21_RPC_DIALECT);
+    cs.endpoint.close("bye");
+    expect(() => cs.endpoint.send("NotifyPeriodicEventStream", STREAM)).toThrow(
+      RpcClosedError,
+    );
+    expect(() =>
+      cs.endpoint.sendCallResultError("csms-1", "FormatViolation", ""),
+    ).toThrow(RpcClosedError);
+    expect(cs.sent).toEqual([]);
   });
 });

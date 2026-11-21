@@ -1,0 +1,171 @@
+{
+  "id": "cert201-remote-start",
+  "name": "OCPP 2.x CP: Remote Start Transaction",
+  "description": "CP-side flow for OCPP 2.0.1 / 2.1: Remote Start Transaction. The graph of cert16-tc010-remote-start with 2.x payloads, CSMS expectations and assertions.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": {
+    "type": "manual"
+  },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": {
+        "x": 400,
+        "y": 50
+      },
+      "data": {
+        "label": "Start",
+        "triggerOn": "connect"
+      }
+    },
+    {
+      "id": "connector-plug-1",
+      "type": "connectorPlug",
+      "position": {
+        "x": 400,
+        "y": 150
+      },
+      "data": {
+        "label": "Plug In",
+        "action": "plugin"
+      }
+    },
+    {
+      "id": "trigger-remote-start",
+      "type": "remoteStartTrigger",
+      "position": {
+        "x": 400,
+        "y": 350
+      },
+      "data": {
+        "label": "Wait for RemoteStartTransaction",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "tx-start",
+      "type": "transaction",
+      "position": {
+        "x": 400,
+        "y": 450
+      },
+      "data": {
+        "label": "Start Transaction",
+        "action": "start",
+        "tagId": "CERT010"
+      }
+    },
+    {
+      "id": "meter-auto",
+      "type": "meterValue",
+      "position": {
+        "x": 400,
+        "y": 650
+      },
+      "data": {
+        "label": "Bounded Auto MeterValue",
+        "value": 0,
+        "sendMessage": true,
+        "autoIncrement": true,
+        "incrementInterval": 5,
+        "incrementAmount": 500,
+        "maxTime": 30,
+        "maxValue": 0
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": {
+        "x": 400,
+        "y": 750
+      },
+      "data": {
+        "label": "End"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "start-1",
+      "target": "connector-plug-1"
+    },
+    {
+      "id": "e2",
+      "source": "connector-plug-1",
+      "target": "trigger-remote-start"
+    },
+    {
+      "id": "e3",
+      "source": "trigger-remote-start",
+      "target": "tx-start"
+    },
+    {
+      "id": "e4",
+      "source": "tx-start",
+      "target": "meter-auto"
+    },
+    {
+      "id": "e5",
+      "source": "meter-auto",
+      "target": "end-1"
+    }
+  ],
+  "ocppVersions": ["2.0.1", "2.1"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "RequestStartTransaction",
+        "node": "trigger-remote-start",
+        "example": {
+          "idToken": {
+            "idToken": "CERT010",
+            "type": "ISO14443"
+          },
+          "remoteStartId": 1,
+          "evseId": 1
+        },
+        "expectedStatus": "Accepted"
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "remote-start-accepted",
+      "type": "response_status",
+      "action": "RequestStartTransaction",
+      "status": "Accepted",
+      "description": "RequestStartTransaction answered Accepted"
+    },
+    {
+      "id": "started",
+      "type": "payload_match",
+      "action": "TransactionEvent",
+      "payload": {
+        "eventType": "Started",
+        "idToken": {
+          "idToken": "CERT010"
+        }
+      },
+      "description": "TransactionEvent Started carries idToken CERT010",
+      "occurrence": "any"
+    },
+    {
+      "id": "start-after-request",
+      "type": "message_after",
+      "before": {
+        "action": "RequestStartTransaction",
+        "direction": "received"
+      },
+      "after": {
+        "action": "TransactionEvent"
+      },
+      "description": "TransactionEvent after RequestStartTransaction"
+    }
+  ]
+}

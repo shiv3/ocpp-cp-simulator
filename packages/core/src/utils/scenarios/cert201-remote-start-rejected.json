@@ -1,0 +1,137 @@
+{
+  "id": "cert201-remote-start-rejected",
+  "name": "OCPP 2.x CP: Remote Start — Rejected",
+  "description": "CP-side flow for OCPP 2.0.1 / 2.1: Remote Start — Rejected. The graph of cert16-tc026-remote-start-rejected with 2.x payloads, CSMS expectations and assertions.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": {
+    "type": "manual"
+  },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": {
+        "x": 400,
+        "y": 50
+      },
+      "data": {
+        "label": "Start",
+        "triggerOn": "connect"
+      }
+    },
+    {
+      "id": "arm-override",
+      "type": "responseOverride",
+      "position": {
+        "x": 400,
+        "y": 250
+      },
+      "data": {
+        "label": "Arm Rejected response for RemoteStartTransaction",
+        "action": "RequestStartTransaction",
+        "status": "Rejected"
+      }
+    },
+    {
+      "id": "trigger-remote-start",
+      "type": "csmsCallTrigger",
+      "position": {
+        "x": 400,
+        "y": 350
+      },
+      "data": {
+        "label": "Wait for RemoteStartTransaction (will be Rejected)",
+        "action": "RequestStartTransaction",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "delay-verify",
+      "type": "delay",
+      "position": {
+        "x": 400,
+        "y": 450
+      },
+      "data": {
+        "label": "Verify no transaction starts",
+        "delaySeconds": 3
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": {
+        "x": 400,
+        "y": 550
+      },
+      "data": {
+        "label": "End"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "start-1",
+      "target": "arm-override"
+    },
+    {
+      "id": "e3",
+      "source": "arm-override",
+      "target": "trigger-remote-start"
+    },
+    {
+      "id": "e4",
+      "source": "trigger-remote-start",
+      "target": "delay-verify"
+    },
+    {
+      "id": "e5",
+      "source": "delay-verify",
+      "target": "end-1"
+    }
+  ],
+  "ocppVersions": ["2.0.1", "2.1"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "RequestStartTransaction",
+        "node": "trigger-remote-start",
+        "example": {
+          "idToken": {
+            "idToken": "CERT026",
+            "type": "ISO14443"
+          },
+          "remoteStartId": 26,
+          "evseId": 1
+        },
+        "expectedStatus": "Rejected",
+        "note": "The scenario arms a Rejected answer."
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "remote-start-received",
+      "type": "ocpp_received",
+      "action": "RequestStartTransaction",
+      "description": "RequestStartTransaction received from the CSMS"
+    },
+    {
+      "id": "remote-start-rejected",
+      "type": "response_status",
+      "action": "RequestStartTransaction",
+      "status": "Rejected",
+      "description": "RequestStartTransaction answered Rejected"
+    },
+    {
+      "id": "no-start-event",
+      "type": "ocpp_absent",
+      "action": "TransactionEvent",
+      "description": "no TransactionEvent sent"
+    }
+  ]
+}

@@ -1,0 +1,159 @@
+{
+  "id": "cert201-authorize-invalid",
+  "name": "OCPP 2.x CP: Authorize Outcome (Invalid)",
+  "description": "CP-side flow for OCPP 2.0.1 / 2.1: Authorize Outcome (Invalid). The graph of cert16-tc023-1-authorize-invalid with 2.x payloads, CSMS expectations and assertions.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": {
+    "type": "manual"
+  },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": {
+        "x": 400,
+        "y": 50
+      },
+      "data": {
+        "label": "Start",
+        "triggerOn": "connect"
+      }
+    },
+    {
+      "id": "plug-in",
+      "type": "connectorPlug",
+      "position": {
+        "x": 400,
+        "y": 150
+      },
+      "data": {
+        "label": "Plug In",
+        "action": "plugin"
+      }
+    },
+    {
+      "id": "tx-start",
+      "type": "transaction",
+      "position": {
+        "x": 400,
+        "y": 250
+      },
+      "data": {
+        "label": "Start Transaction (Invalid idTag)",
+        "action": "start",
+        "tagId": "CERT023-INV"
+      }
+    },
+    {
+      "id": "delay-1",
+      "type": "delay",
+      "position": {
+        "x": 400,
+        "y": 350
+      },
+      "data": {
+        "label": "Wait 2s",
+        "delaySeconds": 2
+      }
+    },
+    {
+      "id": "plug-out",
+      "type": "connectorPlug",
+      "position": {
+        "x": 400,
+        "y": 450
+      },
+      "data": {
+        "label": "Plug Out",
+        "action": "plugout"
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": {
+        "x": 400,
+        "y": 550
+      },
+      "data": {
+        "label": "End"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "start-1",
+      "target": "plug-in"
+    },
+    {
+      "id": "e2",
+      "source": "plug-in",
+      "target": "tx-start"
+    },
+    {
+      "id": "e3",
+      "source": "tx-start",
+      "target": "delay-1"
+    },
+    {
+      "id": "e4",
+      "source": "delay-1",
+      "target": "plug-out"
+    },
+    {
+      "id": "e5",
+      "source": "plug-out",
+      "target": "end-1"
+    }
+  ],
+  "ocppVersions": ["2.0.1", "2.1"],
+  "csmsExpectations": {
+    "calls": [],
+    "answers": [
+      {
+        "action": "Authorize",
+        "when": {
+          "idToken": {
+            "idToken": "CERT023-INV"
+          }
+        },
+        "respond": {
+          "idTokenInfo": {
+            "status": "Invalid"
+          }
+        }
+      }
+    ],
+    "note": "No CSMS call; the CSMS must answer Authorize for CERT023-INV with Invalid."
+  },
+  "assertions": [
+    {
+      "id": "authorize-token",
+      "type": "payload_match",
+      "action": "Authorize",
+      "payload": {
+        "idToken": {
+          "idToken": "CERT023-INV"
+        }
+      },
+      "description": "Authorize carries the expected payload"
+    },
+    {
+      "id": "authorize-invalid",
+      "type": "idtag_info_status",
+      "action": "Authorize",
+      "status": "Invalid",
+      "description": "Authorize answered Invalid"
+    },
+    {
+      "id": "no-start-event",
+      "type": "ocpp_absent",
+      "action": "TransactionEvent",
+      "description": "No transaction after a denied Authorize"
+    }
+  ]
+}

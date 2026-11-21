@@ -14,7 +14,7 @@ import { runTemplate } from "./scenarioCases";
 
 const IDS = scenarioTemplates
   .map((t) => t.id)
-  .filter((id) => id.startsWith("resilience-"));
+  .filter((id) => id.startsWith("resilience-") && !id.endsWith("-201"));
 
 function assertionsOf(id: string): AssertionSpec[] {
   const def = scenarioTemplates

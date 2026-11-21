@@ -1,0 +1,277 @@
+{
+  "id": "essential-cp-behavior-201",
+  "name": "Essential CP Behavior (OCPP 2.0.1 / 2.1)",
+  "description": "Auto-start on connect: plug in, wait for RequestStartTransaction, run a transaction with auto-meter (stops at the EV's target SoC), wait for RequestStopTransaction, then plug out. OCPP 2.0.1 / 2.1 variant of Essential CP Behavior.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": {
+    "type": "manual"
+  },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": {
+        "x": 400,
+        "y": 50
+      },
+      "data": {
+        "label": "Start",
+        "triggerOn": "connect"
+      }
+    },
+    {
+      "id": "delay-2s",
+      "type": "delay",
+      "position": {
+        "x": 400,
+        "y": 150
+      },
+      "data": {
+        "label": "Wait 2s",
+        "delaySeconds": 2
+      }
+    },
+    {
+      "id": "plug-in",
+      "type": "connectorPlug",
+      "position": {
+        "x": 400,
+        "y": 250
+      },
+      "data": {
+        "label": "Plug In",
+        "action": "plugin"
+      }
+    },
+    {
+      "id": "delay-1s",
+      "type": "delay",
+      "position": {
+        "x": 400,
+        "y": 350
+      },
+      "data": {
+        "label": "Wait 1s",
+        "delaySeconds": 1
+      }
+    },
+    {
+      "id": "trigger-remote-start",
+      "type": "remoteStartTrigger",
+      "position": {
+        "x": 400,
+        "y": 450
+      },
+      "data": {
+        "label": "Wait for RemoteStartTransaction",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "tx-start",
+      "type": "transaction",
+      "position": {
+        "x": 400,
+        "y": 550
+      },
+      "data": {
+        "label": "Start Transaction",
+        "action": "start",
+        "tagId": "TAG001"
+      }
+    },
+    {
+      "id": "meter-auto",
+      "type": "meterValue",
+      "position": {
+        "x": 400,
+        "y": 650
+      },
+      "data": {
+        "label": "Auto MeterValue",
+        "value": 0,
+        "sendMessage": true,
+        "autoIncrement": true,
+        "outputKw": 50,
+        "incrementInterval": 5,
+        "incrementAmount": 69.44,
+        "stopMode": "evSettings"
+      }
+    },
+    {
+      "id": "trigger-remote-stop",
+      "type": "remoteStopTrigger",
+      "position": {
+        "x": 400,
+        "y": 750
+      },
+      "data": {
+        "label": "Wait for RemoteStopTransaction",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "tx-stop",
+      "type": "transaction",
+      "position": {
+        "x": 400,
+        "y": 850
+      },
+      "data": {
+        "label": "Stop Transaction",
+        "action": "stop"
+      }
+    },
+    {
+      "id": "plug-out",
+      "type": "connectorPlug",
+      "position": {
+        "x": 400,
+        "y": 950
+      },
+      "data": {
+        "label": "Plug Out",
+        "action": "plugout"
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": {
+        "x": 400,
+        "y": 1050
+      },
+      "data": {
+        "label": "End"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "start-1",
+      "target": "delay-2s"
+    },
+    {
+      "id": "e2",
+      "source": "delay-2s",
+      "target": "plug-in"
+    },
+    {
+      "id": "e3",
+      "source": "plug-in",
+      "target": "delay-1s"
+    },
+    {
+      "id": "e4",
+      "source": "delay-1s",
+      "target": "trigger-remote-start"
+    },
+    {
+      "id": "e5",
+      "source": "trigger-remote-start",
+      "target": "tx-start"
+    },
+    {
+      "id": "e6",
+      "source": "tx-start",
+      "target": "meter-auto"
+    },
+    {
+      "id": "e7",
+      "source": "meter-auto",
+      "target": "trigger-remote-stop"
+    },
+    {
+      "id": "e8",
+      "source": "trigger-remote-stop",
+      "target": "tx-stop"
+    },
+    {
+      "id": "e9",
+      "source": "tx-stop",
+      "target": "plug-out"
+    },
+    {
+      "id": "e10",
+      "source": "plug-out",
+      "target": "end-1"
+    }
+  ],
+  "evSettings": {
+    "modelName": "Compact EV",
+    "batteryCapacityKwh": 10,
+    "maxChargingPowerKw": 50,
+    "initialSoc": 70,
+    "targetSoc": 80
+  },
+  "ocppVersions": ["2.0.1", "2.1"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "RequestStartTransaction",
+        "node": "trigger-remote-start",
+        "example": {
+          "idToken": {
+            "idToken": "TAG001",
+            "type": "ISO14443"
+          },
+          "remoteStartId": 1,
+          "evseId": 1
+        },
+        "expectedStatus": "Accepted"
+      },
+      {
+        "action": "RequestStopTransaction",
+        "node": "trigger-remote-stop",
+        "example": {
+          "transactionId": "<transactionId>"
+        },
+        "expectedStatus": "Accepted"
+      }
+    ],
+    "note": "The RequestStopTransaction comes after the Auto MeterValue node has reached the EV's target SoC (about 75 s with the bundled EV)."
+  },
+  "assertions": [
+    {
+      "id": "remote-start-accepted",
+      "type": "response_status",
+      "action": "RequestStartTransaction",
+      "status": "Accepted",
+      "description": "RequestStartTransaction answered Accepted"
+    },
+    {
+      "id": "started",
+      "type": "payload_match",
+      "action": "TransactionEvent",
+      "payload": {
+        "eventType": "Started",
+        "idToken": {
+          "idToken": "TAG001"
+        }
+      },
+      "description": "TransactionEvent Started carries idToken TAG001",
+      "occurrence": "any"
+    },
+    {
+      "id": "remote-stop-accepted",
+      "type": "response_status",
+      "action": "RequestStopTransaction",
+      "status": "Accepted",
+      "description": "RequestStopTransaction answered Accepted"
+    },
+    {
+      "id": "ended",
+      "type": "payload_match",
+      "action": "TransactionEvent",
+      "payload": {
+        "eventType": "Ended"
+      },
+      "description": "TransactionEvent Ended sent",
+      "occurrence": "any"
+    }
+  ]
+}

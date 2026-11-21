@@ -1,0 +1,130 @@
+{
+  "id": "cert201-reserve-now-occupied",
+  "name": "OCPP 2.x CP: Reserve Now — Occupied",
+  "description": "CP-side flow for OCPP 2.0.1 / 2.1: Reserve Now — Occupied. The graph of cert16-tc048-2-reserve-now-occupied with 2.x payloads, CSMS expectations and assertions.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": {
+    "type": "manual"
+  },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": {
+        "x": 400,
+        "y": 50
+      },
+      "data": {
+        "label": "Start",
+        "triggerOn": "connect"
+      }
+    },
+    {
+      "id": "plug-in",
+      "type": "connectorPlug",
+      "position": {
+        "x": 400,
+        "y": 150
+      },
+      "data": {
+        "label": "Plug In",
+        "action": "plugin"
+      }
+    },
+    {
+      "id": "trigger-reserve-now",
+      "type": "csmsCallTrigger",
+      "position": {
+        "x": 400,
+        "y": 450
+      },
+      "data": {
+        "label": "Wait for ReserveNow (answered Occupied)",
+        "action": "ReserveNow",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "plug-out",
+      "type": "connectorPlug",
+      "position": {
+        "x": 400,
+        "y": 550
+      },
+      "data": {
+        "label": "Plug Out",
+        "action": "plugout"
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": {
+        "x": 400,
+        "y": 750
+      },
+      "data": {
+        "label": "End"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "start-1",
+      "target": "plug-in"
+    },
+    {
+      "id": "e2",
+      "source": "plug-in",
+      "target": "trigger-reserve-now"
+    },
+    {
+      "id": "e5",
+      "source": "trigger-reserve-now",
+      "target": "plug-out"
+    },
+    {
+      "id": "e6",
+      "source": "plug-out",
+      "target": "end-1"
+    }
+  ],
+  "ocppVersions": ["2.0.1", "2.1"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "ReserveNow",
+        "node": "trigger-reserve-now",
+        "example": {
+          "id": 7,
+          "expiryDateTime": "<now+3600s>",
+          "idToken": {
+            "idToken": "CERT-RES01",
+            "type": "ISO14443"
+          },
+          "evseId": 1
+        },
+        "expectedStatus": "Occupied"
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "reserve-received",
+      "type": "ocpp_received",
+      "action": "ReserveNow",
+      "description": "ReserveNow received from the CSMS"
+    },
+    {
+      "id": "reserve-occupied",
+      "type": "response_status",
+      "action": "ReserveNow",
+      "status": "Occupied",
+      "description": "ReserveNow answered Occupied"
+    }
+  ]
+}

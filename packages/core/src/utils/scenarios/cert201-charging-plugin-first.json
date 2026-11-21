@@ -1,0 +1,206 @@
+{
+  "id": "cert201-charging-plugin-first",
+  "name": "OCPP 2.x CP: Charging Session (Plug-In First)",
+  "description": "CP-side flow for OCPP 2.0.1 / 2.1: Charging Session (Plug-In First). The graph of cert16-tc003-charging-plugin-first with 2.x payloads, CSMS expectations and assertions.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": {
+    "type": "manual"
+  },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": {
+        "x": 400,
+        "y": 50
+      },
+      "data": {
+        "label": "Start",
+        "triggerOn": "connect"
+      }
+    },
+    {
+      "id": "delay-connect",
+      "type": "delay",
+      "position": {
+        "x": 400,
+        "y": 150
+      },
+      "data": {
+        "label": "Wait 2s",
+        "delaySeconds": 2
+      }
+    },
+    {
+      "id": "plug-in",
+      "type": "connectorPlug",
+      "position": {
+        "x": 400,
+        "y": 250
+      },
+      "data": {
+        "label": "Plug In",
+        "action": "plugin"
+      }
+    },
+    {
+      "id": "delay-idtag",
+      "type": "delay",
+      "position": {
+        "x": 400,
+        "y": 450
+      },
+      "data": {
+        "label": "Present idTag",
+        "delaySeconds": 2
+      }
+    },
+    {
+      "id": "tx-start",
+      "type": "transaction",
+      "position": {
+        "x": 400,
+        "y": 550
+      },
+      "data": {
+        "label": "Start Transaction",
+        "action": "start",
+        "tagId": "CERT003"
+      }
+    },
+    {
+      "id": "meter-auto",
+      "type": "meterValue",
+      "position": {
+        "x": 400,
+        "y": 750
+      },
+      "data": {
+        "label": "Bounded Auto MeterValue",
+        "value": 0,
+        "sendMessage": true,
+        "autoIncrement": true,
+        "incrementInterval": 5,
+        "incrementAmount": 500,
+        "maxTime": 30,
+        "maxValue": 0
+      }
+    },
+    {
+      "id": "tx-stop",
+      "type": "transaction",
+      "position": {
+        "x": 400,
+        "y": 850
+      },
+      "data": {
+        "label": "Stop Transaction",
+        "action": "stop"
+      }
+    },
+    {
+      "id": "plug-out",
+      "type": "connectorPlug",
+      "position": {
+        "x": 400,
+        "y": 1050
+      },
+      "data": {
+        "label": "Plug Out",
+        "action": "plugout"
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": {
+        "x": 400,
+        "y": 1250
+      },
+      "data": {
+        "label": "End"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "start-1",
+      "target": "delay-connect"
+    },
+    {
+      "id": "e2",
+      "source": "delay-connect",
+      "target": "plug-in"
+    },
+    {
+      "id": "e3",
+      "source": "plug-in",
+      "target": "delay-idtag"
+    },
+    {
+      "id": "e4",
+      "source": "delay-idtag",
+      "target": "tx-start"
+    },
+    {
+      "id": "e5",
+      "source": "tx-start",
+      "target": "meter-auto"
+    },
+    {
+      "id": "e6",
+      "source": "meter-auto",
+      "target": "tx-stop"
+    },
+    {
+      "id": "e7",
+      "source": "tx-stop",
+      "target": "plug-out"
+    },
+    {
+      "id": "e8",
+      "source": "plug-out",
+      "target": "end-1"
+    }
+  ],
+  "ocppVersions": ["2.0.1", "2.1"],
+  "csmsExpectations": {
+    "calls": [],
+    "note": "No CSMS action; the token CERT003 must be authorized (the default answer)."
+  },
+  "assertions": [
+    {
+      "id": "occupied",
+      "type": "state_transition",
+      "targetStatus": "Occupied",
+      "description": "connector reaches Occupied"
+    },
+    {
+      "id": "started",
+      "type": "payload_match",
+      "action": "TransactionEvent",
+      "payload": {
+        "eventType": "Started",
+        "idToken": {
+          "idToken": "CERT003"
+        }
+      },
+      "description": "TransactionEvent Started carries idToken CERT003",
+      "occurrence": "any"
+    },
+    {
+      "id": "ended",
+      "type": "payload_match",
+      "action": "TransactionEvent",
+      "payload": {
+        "eventType": "Ended"
+      },
+      "description": "TransactionEvent Ended sent",
+      "occurrence": "any"
+    }
+  ]
+}

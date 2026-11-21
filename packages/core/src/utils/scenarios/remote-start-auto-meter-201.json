@@ -1,0 +1,143 @@
+{
+  "id": "remote-start-auto-meter-201",
+  "name": "Remote Start + Auto MeterValue (OCPP 2.0.1 / 2.1)",
+  "description": "Wait RequestStartTransaction → Start charging → AutoMeterValue. OCPP 2.0.1 / 2.1 variant of Remote Start + Auto MeterValue.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": {
+    "type": "manual"
+  },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": {
+        "x": 400,
+        "y": 50
+      },
+      "data": {
+        "label": "Start"
+      }
+    },
+    {
+      "id": "trigger-remote",
+      "type": "remoteStartTrigger",
+      "position": {
+        "x": 400,
+        "y": 150
+      },
+      "data": {
+        "label": "Wait RemoteStart",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "transaction-start",
+      "type": "transaction",
+      "position": {
+        "x": 400,
+        "y": 350
+      },
+      "data": {
+        "label": "Start Transaction",
+        "action": "start",
+        "tagId": "REMOTE001"
+      }
+    },
+    {
+      "id": "meter-auto",
+      "type": "meterValue",
+      "position": {
+        "x": 400,
+        "y": 550
+      },
+      "data": {
+        "label": "Auto MeterValue",
+        "value": 0,
+        "sendMessage": true,
+        "autoIncrement": true,
+        "incrementInterval": 10,
+        "incrementAmount": 1000,
+        "maxValue": 0,
+        "maxTime": 0
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": {
+        "x": 400,
+        "y": 650
+      },
+      "data": {
+        "label": "End"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-start-remote",
+      "source": "start-1",
+      "target": "trigger-remote"
+    },
+    {
+      "id": "e-remote-tx",
+      "source": "trigger-remote",
+      "target": "transaction-start"
+    },
+    {
+      "id": "e-tx-meter",
+      "source": "transaction-start",
+      "target": "meter-auto"
+    },
+    {
+      "id": "e-meter-end",
+      "source": "meter-auto",
+      "target": "end-1"
+    }
+  ],
+  "maxDurationSeconds": 120,
+  "ocppVersions": ["2.0.1", "2.1"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "RequestStartTransaction",
+        "node": "trigger-remote",
+        "example": {
+          "idToken": {
+            "idToken": "REMOTE001",
+            "type": "ISO14443"
+          },
+          "remoteStartId": 1,
+          "evseId": 1
+        },
+        "expectedStatus": "Accepted"
+      }
+    ],
+    "note": "Ends when the transaction is stopped (RequestStopTransaction or locally) or after 120 s of station time (maxDurationSeconds): the Auto MeterValue node has no limit of its own."
+  },
+  "assertions": [
+    {
+      "id": "remote-start-accepted",
+      "type": "response_status",
+      "action": "RequestStartTransaction",
+      "status": "Accepted",
+      "description": "RequestStartTransaction answered Accepted"
+    },
+    {
+      "id": "started",
+      "type": "payload_match",
+      "action": "TransactionEvent",
+      "payload": {
+        "eventType": "Started",
+        "idToken": {
+          "idToken": "REMOTE001"
+        }
+      },
+      "description": "TransactionEvent Started carries idToken REMOTE001",
+      "occurrence": "any"
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "id": "cert201-cold-boot",
+  "name": "OCPP 2.x CP: Cold Boot",
+  "description": "CP-side flow for OCPP 2.0.1 / 2.1: Cold Boot. The graph of cert16-tc001-cold-boot with 2.x payloads, CSMS expectations and assertions.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": {
+    "type": "manual"
+  },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": {
+        "x": 400,
+        "y": 50
+      },
+      "data": {
+        "label": "Start",
+        "triggerOn": "connect"
+      }
+    },
+    {
+      "id": "delay-idle",
+      "type": "delay",
+      "position": {
+        "x": 400,
+        "y": 250
+      },
+      "data": {
+        "label": "Idle (Heartbeat continues automatically)",
+        "delaySeconds": 10
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": {
+        "x": 400,
+        "y": 350
+      },
+      "data": {
+        "label": "End"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "start-1",
+      "target": "delay-idle"
+    },
+    {
+      "id": "e3",
+      "source": "delay-idle",
+      "target": "end-1"
+    }
+  ],
+  "ocppVersions": ["2.0.1", "2.1"],
+  "csmsExpectations": {
+    "calls": [],
+    "note": "No CSMS action; the scenario idles for 10 s after the cold boot."
+  },
+  "assertions": [
+    {
+      "id": "idle-no-transaction",
+      "type": "no_unexpected",
+      "actions": ["TransactionEvent"],
+      "description": "No transaction event while idling"
+    }
+  ]
+}

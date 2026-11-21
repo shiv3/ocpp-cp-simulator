@@ -12,6 +12,7 @@ import { EventEmitter } from "../../cp/shared/EventEmitter";
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
 import { scenarioTemplates } from "../../utils/scenarioTemplates";
 import type { GoldenCase } from "./cases";
+import { payloadSourceOf, respondersOf } from "./expectationDriver";
 import type { Rig } from "./rig";
 
 const PAST = "2020-01-01T00:00:00.000Z";
@@ -36,6 +37,10 @@ interface NodeLike {
 export const NOT_UNATTENDED: Readonly<Record<string, string>> = {
   "status-triggered-actions":
     "loops forever (a heartbeat every 10 s) until it is stopped",
+  "essential-cp-behavior-201":
+    "its Auto MeterValue node (stopMode evSettings) runs until the EV's target SoC, about 75 s, and the RequestStop wait comes after it",
+  "full-charging-cycle-201":
+    "its Auto MeterValue node runs until 25000 Wh or 300 s, about five minutes",
   "full-charging-cycle":
     "its Auto MeterValue node runs until 25000 Wh or 300 s, about five minutes",
   "essential-cp-behavior":
@@ -52,6 +57,8 @@ const WINDOWED_MS: Readonly<Record<string, number>> = {
   "status-triggered-actions": 1500,
   "full-charging-cycle": 7500,
   "essential-cp-behavior": 6000,
+  "essential-cp-behavior-201": 6000,
+  "full-charging-cycle-201": 7500,
   "smart-charging": 3500,
   "multi-status-monitor": 3000,
 };
@@ -219,22 +226,20 @@ function operatorFor(templateId: string, payloadFor?: PayloadSource): Operator {
         await send(action, payload(rig, action, next(action)));
         return;
       }
-      case "remoteStartTrigger":
-        await send(
-          "RemoteStartTransaction",
-          payload(
-            rig,
-            "RemoteStartTransaction",
-            next("RemoteStartTransaction"),
-          ),
-        );
+      case "remoteStartTrigger": {
+        const action = rig.is16
+          ? "RemoteStartTransaction"
+          : "RequestStartTransaction";
+        await send(action, payload(rig, action, next(action)));
         return;
-      case "remoteStopTrigger":
-        await send(
-          "RemoteStopTransaction",
-          payload(rig, "RemoteStopTransaction", next("RemoteStopTransaction")),
-        );
+      }
+      case "remoteStopTrigger": {
+        const action = rig.is16
+          ? "RemoteStopTransaction"
+          : "RequestStopTransaction";
+        await send(action, payload(rig, action, next(action)));
         return;
+      }
       case "reservationTrigger":
         await send(
           "ReserveNow",
@@ -461,6 +466,38 @@ export const PINNED_TEMPLATE_IDS: readonly string[] = [
   "remote-start-auto-meter",
   "smart-charging",
   "status-triggered-actions",
+  "cert201-authorize-blocked",
+  "cert201-authorize-expired",
+  "cert201-authorize-invalid",
+  "cert201-cancel-reservation",
+  "cert201-cancel-reservation-rejected",
+  "cert201-charging-id-first",
+  "cert201-charging-plugin-first",
+  "cert201-clear-cache",
+  "cert201-cold-boot",
+  "cert201-data-transfer",
+  "cert201-ev-side-disconnect",
+  "cert201-remote-start",
+  "cert201-remote-start-rejected",
+  "cert201-remote-start-stop",
+  "cert201-remote-stop",
+  "cert201-remote-stop-rejected",
+  "cert201-reserve-now-faulted",
+  "cert201-reserve-now-occupied",
+  "cert201-reserve-now-rejected",
+  "cert201-reserve-now-unavailable",
+  "cert201-reset-immediate",
+  "cert201-reset-onidle",
+  "cert201-trigger-message",
+  "cert201-trigger-message-rejected",
+  "cert201-unlock-ongoing-transaction",
+  "essential-cp-behavior-201",
+  "full-charging-cycle-201",
+  "remote-start-auto-meter-201",
+  "resilience-authorization-rejected-201",
+  "resilience-connector-fault-recovery-201",
+  "resilience-ev-disconnect-recovery-201",
+  "resilience-temporary-unavailable-recovery-201",
   "dataflow-authorize-branch-16",
   "dataflow-authorize-branch-201",
   "dataflow-call-error-handling",
@@ -570,12 +607,35 @@ async function runStopDuringStartRetry(rig: Rig): Promise<void> {
 }
 
 export const scenarioCases: GoldenCase[] = [
-  ...scenarioTemplates.map((t): GoldenCase => ({
-    // The `-201` data-flow templates carry 2.0.1 payloads.
-    name: `${t.id.endsWith("-201") ? "201" : "16"}-scenario-${t.id}`,
-    version: t.id.endsWith("-201") ? "2.0.1" : "1.6",
-    run: (rig) => runTemplate(rig, t.id),
-  })),
+  ...scenarioTemplates.map((t): GoldenCase => {
+    // The 2.x templates (the `-201` data-flow pair and the variants of #1105)
+    // carry 2.0.1 payloads.
+    const is2x = !t.ocppVersions.includes("1.6");
+    if (!is2x) {
+      return {
+        name: `16-scenario-${t.id}`,
+        version: "1.6",
+        run: (rig) => runTemplate(rig, t.id),
+      };
+    }
+    // The data-flow pair keeps the operator table; the variants are driven
+    // by their own declared `csmsExpectations`.
+    if (t.id.startsWith("dataflow-")) {
+      return {
+        name: `201-scenario-${t.id}`,
+        version: "2.0.1",
+        run: (rig) => runTemplate(rig, t.id),
+      };
+    }
+    const def = t.createScenario("CP-GOLDEN", 1);
+    return {
+      name: `201-scenario-${t.id}`,
+      version: "2.0.1",
+      options: { responders: respondersOf(t.csmsExpectations ?? {}) },
+      run: (rig) =>
+        runTemplate(rig, t.id, { payloadFor: payloadSourceOf(def) }),
+    };
+  }),
   {
     name: "16-scenario-stop-during-start-retry",
     version: "1.6",

@@ -10,6 +10,8 @@ These built-in JSON templates implement the Charge Point side of OCPP 1.6 certif
 
 Since schema 1.12 every template also declares `ocppVersions`, `csmsExpectations` (the CSMS calls to send, with example payloads, and the answers to give — the "CSMS-Side Operator Action" column below in machine-readable form) and `assertions` (so a run on the intended path reports PASS, not SKIPPED). `list_scenario_templates` returns them; see `docs/entities/scenario-templates.md`.
 
+The `cert201-*` and `*-201` templates are OCPP 2.0.1 / 2.1 variants of the flows below: the same graph with 2.x payloads, expectations and assertions (see `docs/entities/scenario-templates.md`).
+
 ## Scenario Mapping
 
 | Scenario ID                                         | TC       | Title                                     | Profile       | CSMS-Side Operator Action                                                                                                                                                                                                                      |

@@ -192,8 +192,13 @@ do not expose it yet.
   a frame still queued when the wait ends is written later, and nothing
   cancels it. The reply is consumed: it never reaches the station's own
   handlers. Pick an id no normal CALL uses; normal CALL ids are UUIDs.
-- **Result.** `{ sentFrame, messageId, reply, closed }`: `reply` is the frame
-  as received, or `null` when nothing matched in time; `closed` is set when
+- **Result.** `{ sentFrame, messageId, reply, replies, correlationToken,
+closed }`: `reply` is the frame as received, or `null` when nothing matched
+  in time; `replies` is every matching reply that arrived before the call
+  returned (the call returns at the first reply unless `collectMs` keeps it
+  listening that many more milliseconds, within `waitMs`, so a CSMS that answers
+  the same id twice shows both); `correlationToken` (`raw-<n>`) is unique per
+  command on the charge point and ties the result to the command (#1094); `closed` is set when
   the connection ended during the wait, at once and with its cause:
   `network` (the CSMS or the network closed it), `manual` (a disconnect),
   `internal` (a reset), `simulated` (a network-simulation drop) or

@@ -196,6 +196,8 @@ export const rawFrameOutcomeSchema = z.object({
   sentFrame: z.string(),
   messageId: z.string().nullable(),
   reply: z.array(z.unknown()).nullable(),
+  replies: z.array(z.array(z.unknown())),
+  correlationToken: z.string(),
   closed: z.string().nullable(),
 });
 /**

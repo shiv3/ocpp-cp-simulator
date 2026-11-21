@@ -94,6 +94,41 @@ export const wsClientConfigSchema = z
       .describe(
         "Local IP address the connection binds to. Node (ws) only: Bun ignores it, so a Bun daemon refuses the charge point.",
       ),
+    subprotocols: z
+      .array(z.string().min(1).max(64))
+      .max(16)
+      .optional()
+      .describe(
+        "Sec-WebSocket-Protocol values offered, replacing the one derived from the OCPP version; [] offers none. Each entry is sent as given (case variants, unknown names), as a separate list item.",
+      ),
+    headers: z
+      .record(z.string().min(1).max(256), z.string().max(4096))
+      .optional()
+      .describe(
+        "Extra headers on the upgrade request. Authorization stays owned by Basic Auth / the security profile. Bun and Node.",
+      ),
+    pathSuffix: z
+      .string()
+      .max(2048)
+      .optional()
+      .describe(
+        "Appended to the URL after the charge point id, as given: /, /extra, ?token=x.",
+      ),
+    chargePointIdEncoding: z
+      .enum(["uri-component", "raw"])
+      .optional()
+      .describe(
+        '"uri-component" (default) percent-encodes the id as OCPP-J requires; "raw" puts it in the path as given (pre-encoded, or one the CSMS must reject).',
+      ),
+    pingIntervalSeconds: z
+      .number()
+      .int()
+      .min(0)
+      .max(2_147_483)
+      .optional()
+      .describe(
+        "Initial WebSocketPingInterval in seconds: the client sends a WebSocket ping this often (0 = none, the default). The OCPP key is the source of truth afterwards. Bun and Node.",
+      ),
   })
   .strict();
 

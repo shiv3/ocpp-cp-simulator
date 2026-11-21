@@ -579,6 +579,33 @@ describe("parseArgs OCPP 1.6 security flags", () => {
     expect(JSON.parse(result.stdout).transport.reconnect.maxAttempts).toBe(0);
   });
 
+  it("collects the handshake and ping flags into transport.ws (#1092, #1093)", () => {
+    const result = runParseArgs([
+      ...WS_BASE,
+      "--ws-offer-subprotocol",
+      "OCPP1.6",
+      "--ws-offer-subprotocol",
+      "ocpp2.0.1",
+      "--ws-path-suffix",
+      "/extra?t=1",
+      "--ws-cp-id-raw",
+      "--ws-ping-interval",
+      "20",
+    ]);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).transport.ws).toEqual({
+      subprotocols: ["OCPP1.6", "ocpp2.0.1"],
+      pathSuffix: "/extra?t=1",
+      chargePointIdEncoding: "raw",
+      pingIntervalSeconds: 20,
+    });
+  });
+
+  it("--ws-no-subprotocol offers none (#1092)", () => {
+    const none = runParseArgs([...WS_BASE, "--ws-no-subprotocol"]);
+    expect(JSON.parse(none.stdout).transport.ws).toEqual({ subprotocols: [] });
+  });
+
   it("collects --ws-* flags into transport.ws (#611)", () => {
     const ok = runParseArgs([
       ...WS_BASE,

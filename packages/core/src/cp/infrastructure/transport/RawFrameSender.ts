@@ -18,6 +18,9 @@ type Waiter = {
   /** Set once the frame is on the wire; only then can a reply answer it. */
   armed: boolean;
   readonly settle: (reply: unknown[] | null, closed: string | null) => void;
+  /** A reply for this frame arrived (#1094): the first settles the wait unless
+   *  `collectMs` keeps it open for duplicates. */
+  readonly deliver: (frame: unknown[]) => void;
   readonly fail: (error: Error) => void;
 };
 
@@ -40,6 +43,7 @@ const UNREADABLE_FRAME_IDS = new Set(["", "-1"]);
  */
 export class RawFrameSender {
   private readonly _waiters = new Set<Waiter>();
+  private _sequence = 0;
 
   constructor(
     private readonly _webSocket: OCPPWebSocket,
@@ -74,6 +78,11 @@ export class RawFrameSender {
       OCPP_CALL_RESPONSE_TIMEOUT_MS,
     );
     const messageId = messageIdOf(frame);
+    // #1094: how long to keep listening for duplicate replies after the first.
+    const collectMs = Math.min(Math.max(0, request.collectMs ?? 0), waitMs);
+    // Ties the result to this command, whatever else is on the wire.
+    const correlationToken = `raw-${++this._sequence}`;
+    const replies: unknown[][] = [];
 
     return new Promise((resolve, reject) => {
       const finish = (): boolean => {
@@ -85,13 +94,34 @@ export class RawFrameSender {
         messageId,
         armed: false,
         settle: (reply, closed) => {
-          if (finish()) resolve({ sentFrame: frame, messageId, reply, closed });
+          if (finish()) {
+            resolve({
+              sentFrame: frame,
+              messageId,
+              reply: reply ?? replies[0] ?? null,
+              replies: [...replies],
+              correlationToken,
+              closed,
+            });
+          }
+        },
+        deliver: (reply) => {
+          replies.push(reply);
+          if (collectMs === 0) {
+            waiter.settle(reply, null);
+          } else if (replies.length === 1) {
+            this._clock().clearTimeout(timer);
+            timer = this._clock().setTimeout(
+              () => waiter.settle(null, null),
+              collectMs,
+            );
+          }
         },
         fail: (error) => {
           if (finish()) reject(error);
         },
       };
-      const timer = this._clock().setTimeout(
+      let timer = this._clock().setTimeout(
         () => waiter.settle(null, null),
         waitMs,
       );
@@ -133,7 +163,7 @@ export class RawFrameSender {
         (waiter.messageId !== null && id === waiter.messageId) ||
         (isError && typeof id === "string" && UNREADABLE_FRAME_IDS.has(id))
       ) {
-        waiter.settle(frame, null);
+        waiter.deliver(frame);
         return true;
       }
     }

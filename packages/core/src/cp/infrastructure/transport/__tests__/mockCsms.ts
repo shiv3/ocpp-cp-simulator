@@ -36,6 +36,14 @@ export interface MockCsms {
   /** The `Authorization` header of every WebSocket upgrade request, in
    *  order (#724: the Basic credentials a station presents). */
   upgradeAuthorizations: Array<string | null>;
+  /** Every WebSocket upgrade request as the CSMS saw it (#1092): the raw
+   *  request target (path and query), the `Sec-WebSocket-Protocol` header and
+   *  all headers, lower-cased. */
+  upgradeRequests: Array<{
+    target: string;
+    protocols: string | null;
+    headers: Record<string, string>;
+  }>;
   waitForConnection: (timeoutMs?: number) => Promise<void>;
   waitForFrame: (
     pred: (f: OcppFrame) => boolean,
@@ -84,6 +92,7 @@ export interface MockCsmsOptions {
 export function startMockCsms(options: MockCsmsOptions = {}): MockCsms {
   const received: OcppFrame[] = [];
   const upgradeAuthorizations: Array<string | null> = [];
+  const upgradeRequests: MockCsms["upgradeRequests"] = [];
   const waiters = new Set<FrameWaiter>();
   const connectionWaiters = new Set<ConnectionWaiter>();
   const connectionsList: MockCsmsConnection[] = [];
@@ -113,6 +122,12 @@ export function startMockCsms(options: MockCsmsOptions = {}): MockCsms {
       : {}),
     fetch(req, srv) {
       upgradeAuthorizations.push(req.headers.get("authorization"));
+      const requestUrl = new URL(req.url);
+      upgradeRequests.push({
+        target: requestUrl.pathname + requestUrl.search,
+        protocols: req.headers.get("sec-websocket-protocol"),
+        headers: Object.fromEntries(req.headers.entries()),
+      });
       if (srv.upgrade(req)) {
         return undefined;
       }
@@ -234,6 +249,7 @@ export function startMockCsms(options: MockCsmsOptions = {}): MockCsms {
     port,
     received,
     upgradeAuthorizations,
+    upgradeRequests,
     waitForConnection(timeoutMs = 2000) {
       if (socket) {
         return Promise.resolve();

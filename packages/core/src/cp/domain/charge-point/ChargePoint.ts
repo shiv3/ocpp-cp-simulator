@@ -629,6 +629,7 @@ export class ChargePoint {
       authorizationKey,
       cpoName,
       powerSharing: transportOptions.chargerCapabilities?.powerSharing,
+      webSocketPingIntervalSeconds: wsClientOptions.pingIntervalSeconds,
     });
   }
 

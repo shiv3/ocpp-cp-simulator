@@ -84,6 +84,8 @@ describe("LocalChargePointService A1.1d port methods", () => {
       sentFrame: '[2,"r1"]',
       messageId: "r1",
       reply: null,
+      replies: [],
+      correlationToken: "raw-1",
       closed: null,
     };
     const spy = vi

@@ -19,6 +19,11 @@ export interface RpcDialect<Code extends string = string> {
   readonly notImplemented: Code;
   /** Answer to a CALL whose handler failed. */
   readonly internalError: Code;
+  /** Answer to a frame that is not a valid RPC message: not JSON, not an
+   *  array, or a CALL whose message id, action or length is wrong (Part 4
+   *  §4.3 `RpcFrameworkError`; 1.6 has no such code, see
+   *  `malformedFrameReply`). */
+  readonly rpcFrameworkError: Code;
   /** Whether CALLRESULTERROR (5) and SEND (6) exist: OCPP 2.1 only (Part 4
    *  §4.1.3). Elsewhere they are an unknown message type. */
   readonly ocpp21MessageTypes: boolean;
@@ -33,6 +38,9 @@ export const OCPP16_RPC_DIALECT: RpcDialect<OCPPErrorCodeV16> = {
   },
   notImplemented: OCPPErrorCodeV16.NotImplemented,
   internalError: OCPPErrorCodeV16.InternalError,
+  // 1.6 §4.2.3 Table 7 has no RPC framework code; GenericError is "any
+  // other error not covered by the previous ones".
+  rpcFrameworkError: OCPPErrorCodeV16.GenericError,
   ocpp21MessageTypes: false,
 };
 
@@ -46,6 +54,7 @@ export const OCPP2X_RPC_DIALECT: RpcDialect<OCPPErrorCodeV201> = {
   },
   notImplemented: OCPPErrorCodeV201.NotImplemented,
   internalError: OCPPErrorCodeV201.InternalError,
+  rpcFrameworkError: OCPPErrorCodeV201.RpcFrameworkError,
   ocpp21MessageTypes: false,
 };
 

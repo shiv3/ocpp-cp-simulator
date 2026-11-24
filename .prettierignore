@@ -45,3 +45,6 @@ bun.lock
 src-tauri/target/
 # Vendored OCA OCPP schemas — kept VERBATIM (do not reformat; ND license + reproducibility)
 packages/ocpp/vendor/ocpp-schemas/
+
+# Generated k6 engine bundle (about 1 MB on one line)
+apps/cli/src/exportK6/engine.generated.ts

@@ -1,0 +1,14 @@
+{
+  "name": "@ocpp-cp-simulator/k6-host",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts",
+    "./bundle/*": "./bundle/*.ts"
+  },
+  "dependencies": {
+    "@ocpp-cp-simulator/contracts": "workspace:*",
+    "@ocpp-cp-simulator/core": "workspace:*"
+  }
+}

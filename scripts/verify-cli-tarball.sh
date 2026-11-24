@@ -292,16 +292,16 @@ grep -q '"id":"smoke","ok":true' "$SCRATCH/json.log" \
   || fail "--json did not answer the status command" "$SCRATCH/json.log"
 
 # ---------------------------------------------------------------------------
-# Stage C2 — export-k6 writes its runtime. The runtime used to be copied from
-# src/cli/exportK6/runtime/ beside the running module, which a bundle does not
-# have; it is embedded now (runtimeSources.ts). Run from the installed tree,
-# this is the check that the embedded copy reaches the export.
+# Stage C2 — export-k6 writes its engine. The k6 engine bundle (packages/k6-host)
+# is embedded in the CLI at build time (engine.generated.ts), because a bundle
+# has no packages/ beside it. Run from the installed tree, this is the check
+# that the embedded copy reaches the export.
 # ---------------------------------------------------------------------------
 echo "==> [C2] export-k6 from the installed tree"
-"${RUN[@]}" "$BIN" export-k6 --scenario "$REPO_ROOT/docs/examples/scenarios/demo-charging.json" \
+"${RUN[@]}" "$BIN" export-k6 --scenario "$REPO_ROOT/scripts/verify/k6/quick-charging-cycle.json" \
   --out "$SCRATCH/k6-export" > "$SCRATCH/export-k6.log" 2>&1
 [ $? -eq 0 ] || fail "'ocpp-cp-sim export-k6' exited non-zero" "$SCRATCH/export-k6.log"
-for f in scenario.k6.ts ocpp-runtime/index.ts ocpp-runtime/wire/v16.ts; do
+for f in script.js engine.js scenario.json; do
   [ -f "$SCRATCH/k6-export/$f" ] || fail "export-k6 wrote no $f" "$SCRATCH/export-k6.log"
 done
 

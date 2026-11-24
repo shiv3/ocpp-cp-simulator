@@ -78,7 +78,7 @@ jobs:
       # for the host target takes seconds and fails the same way the release
       # would, on the pull request instead of on the tag.
       - name: CLI sidecar compiles (release smoke)
-        run: bun build --compile --outfile=/tmp/ocpp-cp-sim-smoke apps/cli/src/main.ts
+        run: bun run gen:k6-engine && bun build --compile --outfile=/tmp/ocpp-cp-sim-smoke apps/cli/src/main.ts
 
       # No CI job used to touch the npm tarball at all — the only checks on it
       # lived in cli-release.yml and ran on the `cli-v*` tag, so a PR that

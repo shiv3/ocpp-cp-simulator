@@ -28,7 +28,7 @@
   "references": [
     { "path": "../../packages/contracts" },
     { "path": "../../packages/core" },
-    { "path": "../../packages/k6-runtime" },
+    { "path": "../../packages/k6-host" },
     { "path": "../../packages/ocpp" }
   ],
   "include": [

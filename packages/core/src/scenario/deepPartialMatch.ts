@@ -5,11 +5,6 @@
  * subset (extra keys in `actual` are ignored); arrays are compared
  * element-by-element and must be the same length — an author pinning an
  * array generally means the whole array, not just a prefix.
- *
- * The k6 export runtime keeps its own copy in
- * packages/k6-runtime/src/assertions.ts (the runtime purity gate forbids
- * repo imports); packages/core/src/scenario/__tests__/deepPartialMatch.test.ts runs a
- * shared vector table against both to keep them from drifting.
  */
 export function deepPartialMatch(subset: unknown, actual: unknown): boolean {
   if (subset === actual) return true;

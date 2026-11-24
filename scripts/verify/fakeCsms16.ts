@@ -28,6 +28,10 @@ export interface FakeCsmsHandle {
   readonly port: number;
   readonly frames: FrameRecord[];
   readonly connected: Set<string>;
+  /** CALLs received from charge points, by action (kept even without frames). */
+  readonly counts: Record<string, number>;
+  /** Every charge point id that ever connected, and how many connections. */
+  readonly seen: Map<string, number>;
   stop(): void;
 }
 
@@ -39,6 +43,9 @@ interface Socket {
 export function startFakeCsms(opts: FakeCsmsOptions): FakeCsmsHandle {
   const frames: FrameRecord[] = [];
   const connected = new Set<string>();
+  const counts: Record<string, number> = {};
+  const seen = new Map<string, number>();
+  let transactionId = 0;
   if (opts.logFile) writeFileSync(opts.logFile, "");
   const record = (cp: string, dir: "in" | "out", frame: unknown): void => {
     if (opts.keepFrames === false && !opts.logFile) return;
@@ -49,9 +56,18 @@ export function startFakeCsms(opts: FakeCsmsOptions): FakeCsmsHandle {
   const server = Bun.serve<Socket>({
     port: opts.port,
     fetch(req, srv) {
-      const cp = decodeURIComponent(
-        new URL(req.url).pathname.split("/").pop() ?? "",
-      );
+      const url = new URL(req.url);
+      // `GET /counts`: what the load-test smoke asserts on (#1126).
+      if (url.pathname === "/counts") {
+        return Response.json({
+          counts,
+          connected: connected.size,
+          uniqueIds: seen.size,
+          connections: [...seen.values()].reduce((a, b) => a + b, 0),
+          ids: [...seen.keys()].sort(),
+        });
+      }
+      const cp = decodeURIComponent(url.pathname.split("/").pop() ?? "");
       const ok = srv.upgrade(req, {
         data: { cp, seq: 0 },
         headers: { "Sec-WebSocket-Protocol": "ocpp1.6" },
@@ -61,6 +77,7 @@ export function startFakeCsms(opts: FakeCsmsOptions): FakeCsmsHandle {
     websocket: {
       open(ws) {
         connected.add(ws.data.cp);
+        seen.set(ws.data.cp, (seen.get(ws.data.cp) ?? 0) + 1);
       },
       close(ws) {
         connected.delete(ws.data.cp);
@@ -81,6 +98,7 @@ export function startFakeCsms(opts: FakeCsmsOptions): FakeCsmsHandle {
         };
         if (msg[0] !== 2) return;
         const [, id, action] = msg as [number, string, string];
+        counts[action] = (counts[action] ?? 0) + 1;
         if (action === "BootNotification") {
           send([
             3,
@@ -107,6 +125,17 @@ export function startFakeCsms(opts: FakeCsmsOptions): FakeCsmsHandle {
           }
         } else if (action === "Heartbeat") {
           send([3, id, { currentTime: new Date().toISOString() }]);
+        } else if (action === "Authorize" || action === "StopTransaction") {
+          send([3, id, { idTagInfo: { status: "Accepted" } }]);
+        } else if (action === "StartTransaction") {
+          send([
+            3,
+            id,
+            {
+              transactionId: ++transactionId,
+              idTagInfo: { status: "Accepted" },
+            },
+          ]);
         } else {
           send([3, id, {}]);
         }
@@ -117,6 +146,8 @@ export function startFakeCsms(opts: FakeCsmsOptions): FakeCsmsHandle {
     port: server.port ?? opts.port,
     frames,
     connected,
+    counts,
+    seen,
     stop: () => void server.stop(true),
   };
 }

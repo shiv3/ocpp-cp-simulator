@@ -12,7 +12,7 @@ CSMS-initiated commands.
 bun run test:e2e
 ```
 
-This builds the Go CSMS fixture once, then runs the suites listed in the
+This installs the CSMS once, then runs the suites listed in the
 `test:e2e` script of `package.json`: the per-version suites
 (`e2e/ocpp16.gocpp.e2e.ts`, `e2e/ocpp201.gocpp.e2e.ts`, `e2e/ocpp21.gocpp.e2e.ts`),
 `e2e/chargingProfile.gocpp.e2e.ts` (OCPP 1.6 smart charging),
@@ -22,51 +22,55 @@ Run a single suite with `bun test ./e2e/ocpp201.gocpp.e2e.ts`.
 
 ## Requirements
 
-- **Go 1.26+** on PATH (the CSMS fixture is a Go program), and network access
-  to the Go module proxy on the first build.
+- **Go 1.26+** on PATH (the CSMS is a Go program, installed with `go install`),
+  and network access to the Go module proxy on the first install.
 - **Bun** (already required by the repo).
 
-The gocpp revision the fixture is measured against is **pinned** in
-`csms/go.mod` (`require github.com/shiv3/gocpp v0.1.7`) and checksummed in
-`csms/go.sum`, so every machine builds against the same oracle and a pass is
-reproducible (#322). No sibling checkout is needed or consulted — an earlier
-`replace github.com/shiv3/gocpp => ../../../gocpp` made whatever happened to be
-in `../gocpp` the oracle, unrecorded. To move the pin:
+The CSMS is gocpp's own
+[`cmd/gocpp-csms`](https://github.com/shiv3/gocpp/tree/main/cmd/gocpp-csms)
+(it used to live here as `e2e/csms/`; gocpp now owns it and pins this
+harness's contract in its own tests). Its version is **pinned** in one place,
+[`gocpp-csms.version`](gocpp-csms.version) (a gocpp tag or pseudo-version), and
+`support/buildCsms.ts` runs
 
 ```sh
-cd e2e/csms && go get github.com/shiv3/gocpp@v0.1.8 && go mod tidy
+GOBIN=e2e/.bin go install github.com/shiv3/gocpp/cmd/gocpp-csms@$(cat e2e/gocpp-csms.version)
 ```
 
-then run the suites and commit `go.mod` + `go.sum` together. If `go` is missing,
-`support/buildCsms.ts` says so instead of failing with an ENOENT stack.
+so every machine runs the same oracle, checksummed by the Go sum database, and
+a pass is reproducible (#322). The binary lands in `e2e/.bin/` (gitignored).
+No sibling checkout is needed or consulted. To move the pin, write the new
+version into `gocpp-csms.version` (resolve a commit with
+`go list -m -json github.com/shiv3/gocpp@<commit>`), run the suites and commit
+it. If `go` is missing, `support/buildCsms.ts` says so instead of failing with
+an ENOENT stack.
 
 The suites are excluded from the default `test` / `test:vitest` scripts and
 from the `tsc -b` build graph, and the pull-request CI does not run them. The
 [`E2E` workflow](../.github/workflows/e2e.yml) does, every Monday at 03:17 UTC
 and on demand from the Actions tab (#624): it sets up Go from
-`csms/go.mod`, runs the fixture's lint and unit tests and then
-`bun run test:e2e`, against the pinned gocpp. When a run fails it uploads the
+a fixed Go version (module cache keyed on `gocpp-csms.version`) and runs
+`bun run test:e2e` against the pinned CSMS. When a run fails it uploads the
 `e2e-traces` artifact (30 days): with `E2E_TRACE_DIR` set,
 `support/gocppCsms.ts` writes, for every fixture process,
 `csms-<version>-<pid>-<n>.ndjson` (the frames in the order the CSMS received
 them) and `.stderr.log`. Set the variable locally to get the same files.
 
-The fixture has its own checks, runnable without Bun's e2e suites or a
-simulator: `bun run lint:e2e-csms` (`gofmt` and `go vet`) and
-`bun run test:e2e-csms` (`go test -race`). Started alone,
-`e2e/csms/e2e-csms --version=1.6` prints the `E2E_CSMS_PORTS` line and serves
+The CSMS's own unit tests live in gocpp. Started alone,
+`e2e/.bin/gocpp-csms --version=1.6` prints the `E2E_CSMS_PORTS` line and serves
 the endpoints below on 127.0.0.1.
 
 ## Layout
 
-- `csms/` — the Go CSMS fixture. One binary, `--version=1.6|2.0.1|2.1`: one
-  `csms.Server` per process, records every received frame as NDJSON to stdout
-  (after an `E2E_CSMS_PORTS` sentinel line), and exposes `GET /healthz` +
-  a typed `POST /command` for CSMS→CP actions. Built to `csms/e2e-csms` (gitignored).
+- `gocpp-csms.version` — the pinned version of gocpp's `cmd/gocpp-csms`. One
+  binary, `--version=1.6|2.0.1|2.1`: one `csms.Server` per process, records
+  every received frame as NDJSON to stdout (after an `E2E_CSMS_PORTS` sentinel
+  line), and exposes `GET /healthz` + a typed `POST /command` for CSMS→CP
+  actions. Installed to `.bin/gocpp-csms` (gitignored).
 - `support/gocppCsms.ts` — spawns/drains the fixture, parses ports, polls health,
   exposes `frames` / `command()` / `stop()`; cleans up (no orphans).
 - `support/frameLog.ts` — accumulates recorded frames; `waitForCall` / `waitForFrame`.
-- `support/buildCsms.ts` — builds the Go binary.
+- `support/buildCsms.ts` — `go install`s the pinned CSMS (once per process).
 - `ocpp16|201|21.gocpp.e2e.ts` — the per-version suites (driven in-process via
   `ChargePoint`, asserting on the CSMS frame log + CP state).
 - `chargingProfile.gocpp.e2e.ts` — OCPP 1.6 smart charging: a 6 A
@@ -120,7 +124,7 @@ behavior after each test.
 `POST /command` takes `{ "cpId", "action", ...fields }`, the fields named as in
 the OCPP request, and returns `{ "ok", "result", "error" }` with the CP's
 response as `result`. Actions per `--version`
-(`csms/command.go`):
+(`command.go` in gocpp's `cmd/gocpp-csms`):
 
 - **1.6** — `RemoteStartTransaction`, `RemoteStopTransaction`, `Reset`,
   `ReserveNow`, `CancelReservation`, `SetChargingProfile`,

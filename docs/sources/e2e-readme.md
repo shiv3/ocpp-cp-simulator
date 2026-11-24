@@ -5,13 +5,13 @@ summary: End-to-end suite (weekly in CI, #624) that runs the simulator as a real
 sources:
   - e2e/README.md
   - e2e/*.gocpp.e2e.ts
-  - e2e/csms/ (Go fixture)
+  - e2e/gocpp-csms.version (pinned CSMS)
 related:
   - ../entities/csms-peers.md
   - ../analyses/testing-strategy.md
   - ../concepts/ocpp-versions-and-transports.md
   - example-scenarios.md
-updated: 2026-11-08
+updated: 2026-11-25
 ---
 
 # Source: `e2e/README.md`
@@ -21,7 +21,7 @@ independent implementation ([gocpp](../entities/csms-peers.md#gocpp)) and its
 inbound handling via CSMS-initiated commands. Everything is real: WebSocket,
 CP, CSMS.
 
-**Run.** `bun run test:e2e` builds the Go CSMS fixture once, then runs seven
+**Run.** `bun run test:e2e` installs the CSMS once, then runs seven
 suites: `e2e/ocpp16.gocpp.e2e.ts`, `e2e/chargingProfile.gocpp.e2e.ts`,
 `e2e/ocpp201.gocpp.e2e.ts`, `e2e/ocpp21.gocpp.e2e.ts`,
 `e2e/scenario.gocpp.e2e.ts`, `e2e/comprehensive.gocpp.e2e.ts` (runs
@@ -30,29 +30,30 @@ suites: `e2e/ocpp16.gocpp.e2e.ts`, `e2e/chargingProfile.gocpp.e2e.ts`,
 single suite with `bun test ./e2e/ocpp201.gocpp.e2e.ts`.
 
 **Requirements.** Go 1.26+ on PATH and network access to the
-Go module proxy on the first build; Bun. The gocpp revision is **pinned** in
-`e2e/csms/go.mod` (`github.com/shiv3/gocpp v0.1.7`) and checksummed in
-`go.sum` (#322) — no sibling checkout; the earlier `replace` to `../gocpp`
-made an unrecorded working copy the oracle. Move the pin with
-`go get github.com/shiv3/gocpp@<tag> && go mod tidy` in `e2e/csms`. The suites are
+Go module proxy on the first install; Bun. The CSMS is gocpp's
+`cmd/gocpp-csms` (formerly this repo's `e2e/csms/`, now owned by gocpp), its
+version **pinned** in `e2e/gocpp-csms.version` (#322) and installed by
+`support/buildCsms.ts` with `go install …/cmd/gocpp-csms@<version>` into
+`e2e/.bin/` (gitignored) — no sibling checkout. Move the pin by editing that
+file. The suites are
 excluded from `test`, `test:vitest`, the `tsc -b` graph and the pull-request
 CI. The `.github/workflows/e2e.yml` workflow runs them Mondays 03:17 UTC and on
-demand, with Go from `csms/go.mod` and the fixture's own `lint:e2e-csms` /
-`test:e2e-csms` first; a failed run uploads the `e2e-traces` artifact (30
+demand, with a fixed Go version and the module cache keyed on the pin file;
+the CSMS's unit tests live in gocpp. A failed run uploads the `e2e-traces` artifact (30
 days), written by `support/gocppCsms.ts` when `E2E_TRACE_DIR` is set: per
 fixture process the received frames as NDJSON and its stderr.
 
 **Layout.**
 
-- `csms/` — one Go binary, `--version=1.6|2.0.1|2.1`; records every received
-  frame as NDJSON to stdout after an `E2E_CSMS_PORTS` sentinel line; exposes
-  `GET /healthz`, a typed `POST /command` for CSMS→CP actions, and the
-  switches below. Built to `csms/e2e-csms` (gitignored). Has its own Go unit
-  tests.
+- `gocpp-csms.version` — pins gocpp's `cmd/gocpp-csms`: one Go binary,
+  `--version=1.6|2.0.1|2.1`; records every received frame as NDJSON to stdout
+  after an `E2E_CSMS_PORTS` sentinel line; exposes `GET /healthz`, a typed
+  `POST /command` for CSMS→CP actions, and the switches below. Installed to
+  `.bin/gocpp-csms` (gitignored); its unit tests live in gocpp.
 - `support/gocppCsms.ts` — spawns/drains the fixture, parses ports, polls
   health, exposes `frames` / `command()` / `stop()`, cleans up (no orphans).
 - `support/frameLog.ts` — `waitForCall` / `waitForFrame` over recorded frames.
-- `support/buildCsms.ts` — builds the Go binary.
+- `support/buildCsms.ts` — `go install`s the pinned CSMS.
 - `ocpp16|201|21.gocpp.e2e.ts` — per-version suites, driven in-process via
   `ChargePoint`, asserting on the CSMS frame log + CP state.
 - `chargingProfile.gocpp.e2e.ts` — OCPP 1.6 smart charging (#323): a 6 A
@@ -74,7 +75,7 @@ unchanged. Field tables are in `e2e/README.md`; `behavior.gocpp.e2e.ts` covers
 Pending to Accepted, authorization rejection, rate limiting, offline with
 reconnect, and a delayed sequence under 1.6 and 2.0.1.
 
-**CSMS→CP actions** (`e2e/csms/command.go`, listed in the README):
+**CSMS→CP actions** (`command.go` in gocpp's `cmd/gocpp-csms`, listed in the README):
 
 - 1.6 — `RemoteStartTransaction`, `RemoteStopTransaction`, `Reset`,
   `ReserveNow`, `CancelReservation`, `SetChargingProfile`,

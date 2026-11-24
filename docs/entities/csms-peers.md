@@ -46,9 +46,9 @@ Central System (Java).
 ## gocpp
 
 [gocpp](https://github.com/shiv3/gocpp) — a Go OCPP library by the same author.
-The [e2e suite](../sources/e2e-readme.md) builds a gocpp-based CSMS fixture
-(one binary, `--version=1.6|2.0.1|2.1`, pinned to `gocpp v0.1.7` in
-`e2e/csms/go.mod`, #322) and runs the simulator as a real charge point over a
+The [e2e suite](../sources/e2e-readme.md) installs gocpp's standalone CSMS,
+`cmd/gocpp-csms` (one binary, `--version=1.6|2.0.1|2.1`; formerly this repo's
+`e2e/csms/`), at the version pinned in `e2e/gocpp-csms.version` (#322) and runs the simulator as a real charge point over a
 real WebSocket against it, asserting on the CSMS frame log. It is
 the independent implementation that validates the simulator's multi-version
 wire output; the fixture also exposes `POST /command` so tests can issue

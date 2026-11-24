@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  CallWaiters as RpcCallWaiters,
+  OCPPMessageType as RpcMessageType,
+  encodeCall,
+} from "@ocpp-cp-simulator/ocpp-rpc/index";
+
+import { OCPPMessageType } from "../../../domain/types/OcppTypes";
 import { CallWaiters } from "../CallWaiters";
+import { encodeCallFrame } from "../callFrame";
 
 describe("CallWaiters", () => {
   beforeEach(() => vi.useFakeTimers());
@@ -38,5 +46,20 @@ describe("CallWaiters", () => {
 
   it("ignores an id nobody waits for", () => {
     expect(() => make().resolve("nobody", "x")).not.toThrow();
+  });
+});
+
+describe("core's ocpp-rpc seam (#978)", () => {
+  it("is the ocpp-rpc CallWaiters", () => {
+    expect(new CallWaiters<string>(1, () => new Error())).toBeInstanceOf(
+      RpcCallWaiters,
+    );
+  });
+
+  it("writes frames and message types through the ocpp-rpc codec", () => {
+    expect(OCPPMessageType).toBe(RpcMessageType);
+    expect(encodeCallFrame("m1", "Heartbeat", {})).toBe(
+      encodeCall("m1", "Heartbeat", {}),
+    );
   });
 });

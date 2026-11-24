@@ -17,6 +17,9 @@
       "path": "../ocpp"
     },
     {
+      "path": "../ocpp-rpc"
+    },
+    {
       "path": "../vehicle"
     }
   ],

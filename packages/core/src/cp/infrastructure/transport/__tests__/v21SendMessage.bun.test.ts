@@ -50,8 +50,14 @@ describe("OCPP 2.1 SEND (#1096)", () => {
         basetime: "2026-11-21T00:00:00Z",
         data: [{ t: 0.5, v: "12.5" }],
       };
-      await cp.sendOcppSend({ action: "NotifyPeriodicEventStream", payload });
+      const sent = await cp.sendOcppSend({
+        action: "NotifyPeriodicEventStream",
+        payload,
+      });
       expect((await csms.waitForFrame((f) => f[0] === 6))[3]).toEqual(payload);
+      expect(sent.sentFrame).toBe(
+        `[6,"${sent.messageId}","NotifyPeriodicEventStream",{"id":3,"pending":1,"basetime":"2026-11-21T00:00:00Z","data":[{"t":0.5,"v":"12.5"}]}]`,
+      );
 
       await expect(
         cp.sendOcppSend({

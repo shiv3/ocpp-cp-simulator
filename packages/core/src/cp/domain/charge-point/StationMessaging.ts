@@ -8,7 +8,10 @@ import {
   type Get15118EVCertificateResult,
 } from "../security/get15118EVCertificate";
 import type { Outbox } from "../transport/Outbox";
-import { OCPPMessageType } from "../types/OcppTypes";
+import {
+  encodeCallResultError,
+  encodeSend,
+} from "@ocpp-cp-simulator/ocpp-rpc/index";
 import type { OcppCallActions } from "../transport/OcppCallActions";
 import type { RawFrameSink } from "../transport/RawFrameSink";
 import type {
@@ -203,13 +206,7 @@ export class StationMessaging {
       if (warning) throw new OcppCallRejectedError("invalid_payload", warning);
     }
     const messageId = this.host.chargePoint.rng("expert-send").uuid();
-    // `[6, messageId, action, payload]`, the frame callFrame.encodeSendFrame builds.
-    const frame = JSON.stringify([
-      OCPPMessageType.SEND,
-      messageId,
-      request.action,
-      payload,
-    ]);
+    const frame = encodeSend(messageId, request.action, payload);
     await this.sendRawFrame({ frame, waitMs: 0 });
     return { messageId, sentFrame: frame };
   }
@@ -255,13 +252,12 @@ export class StationMessaging {
         "A CALLRESULTERROR needs the id of the CALL that was answered",
       );
     }
-    const frame = JSON.stringify([
-      5,
+    const frame = encodeCallResultError(
       request.messageId,
       request.errorCode ?? "FormatViolation",
       request.errorDescription ?? "",
-      request.errorDetails ?? {},
-    ]);
+      request.errorDetails,
+    );
     await this.sendRawFrame({ frame, waitMs: 0 });
     return { sentFrame: frame, messageId: request.messageId };
   }

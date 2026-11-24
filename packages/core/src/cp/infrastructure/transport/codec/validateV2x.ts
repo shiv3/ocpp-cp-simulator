@@ -1,7 +1,8 @@
 import { schemas } from "@ocpp-cp-simulator/ocpp/index";
 import { strictValidationIssues } from "@ocpp-cp-simulator/ocpp/validate";
-import { OCPPErrorCodeV201 } from "@ocpp-cp-simulator/ocpp/enums";
+import type { OCPPErrorCodeV201 } from "@ocpp-cp-simulator/ocpp/enums";
 import { OCPP_2_0_1, OCPP_2_1 } from "../../../domain/types/OcppVersion";
+import { OCPP2X_RPC_DIALECT } from "@ocpp-cp-simulator/ocpp-rpc/index";
 import { requestSchemaKey } from "./requestSchemaKey";
 import { violationKind, type ViolationKind } from "./violationKind";
 
@@ -11,12 +12,8 @@ export interface InboundV2xViolation {
   readonly description: string;
 }
 
-const CODE_OF_KIND: Record<ViolationKind, OCPPErrorCodeV201> = {
-  format: OCPPErrorCodeV201.FormatViolation,
-  occurrence: OCPPErrorCodeV201.OccurrenceConstraintViolation,
-  type: OCPPErrorCodeV201.TypeConstraintViolation,
-  property: OCPPErrorCodeV201.PropertyConstraintViolation,
-};
+const CODE_OF_KIND: Readonly<Record<ViolationKind, OCPPErrorCodeV201>> =
+  OCPP2X_RPC_DIALECT.violationCodes;
 
 const v201Schemas = schemas.v201 as Record<string, unknown>;
 const v21Schemas = schemas.v21 as Record<string, unknown>;

@@ -124,6 +124,11 @@ export function persistCreate(
         "reservation_authorize_id_tag",
         init.reservationAuthorizeIdTag ? 1 : null,
       ],
+      [
+        "meter_value_decimal_separator",
+        init.meterValueDecimalSeparator === "," ? "," : null,
+      ],
+      ["empty_meter_values", init.emptyMeterValues ? 1 : null],
     ],
     ["cp_id"],
     // The row keeps the time it was first created.

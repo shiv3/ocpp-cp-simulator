@@ -110,6 +110,8 @@ export function toSnapshotConfig(
     txUpdatedMeterValues: config.txUpdatedMeterValues,
     inboundValidation: config.inboundValidation,
     reservationAuthorizeIdTag: config.reservationAuthorizeIdTag,
+    meterValueDecimalSeparator: config.meterValueDecimalSeparator,
+    emptyMeterValues: config.emptyMeterValues,
     capabilityProfile: config.capabilityProfile,
     ...(config.transport === undefined ? {} : { transport: config.transport }),
     chargerCapabilities: config.chargerCapabilities,

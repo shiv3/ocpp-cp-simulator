@@ -201,7 +201,12 @@ CREATE TABLE IF NOT EXISTS charge_points (
   reservation_authorize_id_tag INTEGER,
   -- #327: a JSON object of the charger-side delivery caps per connector;
   -- NULL (a row older than the column) is no cap.
-  charger_capabilities TEXT
+  charger_capabilities TEXT,
+  -- #1133: "," when OCPP 1.6 meter values use a decimal comma; NULL is ".".
+  meter_value_decimal_separator TEXT,
+  -- #1134: 1 when periodic / clock-aligned samples go out with no sampled
+  -- values; NULL (a row older than the column) is off.
+  empty_meter_values INTEGER
 );
 
 -- Per-CP UI / operator state. Currently holds the "desired connected"

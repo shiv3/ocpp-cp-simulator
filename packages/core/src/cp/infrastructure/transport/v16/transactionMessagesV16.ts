@@ -15,6 +15,10 @@ import {
   type ReadingContext,
 } from "../../../domain/connector/MeterValueBuilder";
 import {
+  emptiesSample,
+  withDecimalSeparator,
+} from "../../../domain/connector/meterQuirks";
+import {
   signReading,
   toOcpp16SampledValue,
 } from "../../../domain/connector/SignedMeterData";
@@ -34,7 +38,12 @@ export interface TransactionMessagesV16Context {
    *  `clockOf` read it. */
   readonly chargePoint: Pick<
     ChargePoint,
-    "clock" | "configuration" | "getConnector" | "mainMeter" | "signedMeterFor"
+    | "clock"
+    | "configuration"
+    | "getConnector"
+    | "mainMeter"
+    | "meterQuirks"
+    | "signedMeterFor"
   >;
   readonly logger: Logger;
   readonly delivery: Pick<
@@ -240,8 +249,14 @@ export class TransactionMessagesV16 {
           ]
         : []),
     ];
+    // #1133: the same decimal separator as MeterValues.
+    const separator = this._chargePoint.meterQuirks?.decimalSeparator;
+    const spelled = data.map((entry) => ({
+      ...entry,
+      sampledValue: withDecimalSeparator(entry.sampledValue, separator),
+    }));
     // Same strict-unit-union cast as sendMeterValue below.
-    return data as unknown as StopTransactionRequestV16["transactionData"];
+    return spelled as unknown as StopTransactionRequestV16["transactionData"];
   }
 
   public sendTransactionEvent(event: TransactionLifecycleEvent): void {
@@ -317,9 +332,12 @@ export class TransactionMessagesV16 {
       );
       if (signed) sampledValue.push(toOcpp16SampledValue(signed.ocmf, context));
     }
+    // #1134: a reading that failed: taken as usual, sent without its values
+    // (deliberately non-conformant).
+    const empty = emptiesSample(this._chargePoint, connector, context);
     // 1.6 requires sampledValue 1..*, which the OCA schema leaves unchecked
     // (#1064): an empty request is worse than no request.
-    if (sampledValue.length === 0) return;
+    if (!empty && sampledValue.length === 0) return;
 
     const payload: MeterValuesRequestV16 = {
       transactionId:
@@ -334,8 +352,10 @@ export class TransactionMessagesV16 {
           // shape, but its `unit` is a plain `string` whereas ts-ocpp's
           // generated type is a strict union. Cast at this boundary
           // rather than mirror the entire enum.
-          sampledValue:
-            sampledValue as unknown as MeterValuesRequestV16["meterValue"][0]["sampledValue"],
+          sampledValue: withDecimalSeparator(
+            empty ? [] : sampledValue,
+            this._chargePoint.meterQuirks?.decimalSeparator,
+          ) as unknown as MeterValuesRequestV16["meterValue"][0]["sampledValue"],
         },
       ],
     };

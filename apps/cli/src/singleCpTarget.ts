@@ -709,6 +709,9 @@ function snapshotToCliStatus(snapshot: ChargePointSnapshot): ChargePointStatus {
           txUpdatedMeterValues: snapshot.config.txUpdatedMeterValues,
           inboundValidation: snapshot.config.inboundValidation,
           reservationAuthorizeIdTag: snapshot.config.reservationAuthorizeIdTag,
+          meterValueDecimalSeparator:
+            snapshot.config.meterValueDecimalSeparator,
+          emptyMeterValues: snapshot.config.emptyMeterValues,
           capabilityProfile: snapshot.config.capabilityProfile,
           chargerCapabilities: snapshot.config.chargerCapabilities,
           tlsCaPath: snapshot.config.tlsCaPath,

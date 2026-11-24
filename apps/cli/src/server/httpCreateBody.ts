@@ -254,6 +254,20 @@ export function parseCreateBody(
     typeof body.reservationAuthorizeIdTag === "boolean"
       ? body.reservationAuthorizeIdTag
       : undefined;
+  let meterValueDecimalSeparator: ChargePointInitOptions["meterValueDecimalSeparator"];
+  if (body.meterValueDecimalSeparator !== undefined) {
+    if (
+      body.meterValueDecimalSeparator !== "." &&
+      body.meterValueDecimalSeparator !== ","
+    ) {
+      throw new Error('meterValueDecimalSeparator must be "." or ","');
+    }
+    meterValueDecimalSeparator = body.meterValueDecimalSeparator;
+  }
+  const emptyMeterValues =
+    typeof body.emptyMeterValues === "boolean"
+      ? body.emptyMeterValues
+      : undefined;
   const capabilityProfile = parseCapabilityProfile(body.capabilityProfile);
   let chargerCapabilities: ChargePointInitOptions["chargerCapabilities"];
   if (body.chargerCapabilities !== undefined) {
@@ -367,6 +381,10 @@ export function parseCreateBody(
     ...(reservationAuthorizeIdTag !== undefined
       ? { reservationAuthorizeIdTag }
       : {}),
+    ...(meterValueDecimalSeparator !== undefined
+      ? { meterValueDecimalSeparator }
+      : {}),
+    ...(emptyMeterValues !== undefined ? { emptyMeterValues } : {}),
     ...(capabilityProfile ? { capabilityProfile } : {}),
     ...(chargerCapabilities ? { chargerCapabilities } : {}),
     ...(modem ? { modem } : {}),

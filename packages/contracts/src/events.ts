@@ -97,6 +97,10 @@ interface FullCpConfig {
   txUpdatedMeterValues?: boolean;
   inboundValidation?: "off" | "warn" | "enforce";
   reservationAuthorizeIdTag?: boolean;
+  /** #1133: `","` formats OCPP 1.6 meter values with a decimal comma. */
+  meterValueDecimalSeparator?: "." | ",";
+  /** #1134: periodic / clock-aligned samples go out with no sampled values. */
+  emptyMeterValues?: boolean;
   capabilityProfile?: WireCapabilityProfile;
   /** Reconnect policy and WebSocket client options (#609, #611). */
   transport?: TransportConfigWire;
@@ -140,6 +144,8 @@ export function redactCp(config: FullCpConfig): WireCpConfig {
     txUpdatedMeterValues: config.txUpdatedMeterValues,
     inboundValidation: config.inboundValidation,
     reservationAuthorizeIdTag: config.reservationAuthorizeIdTag,
+    meterValueDecimalSeparator: config.meterValueDecimalSeparator,
+    emptyMeterValues: config.emptyMeterValues,
     capabilityProfile: config.capabilityProfile
       ? {
           ...(config.capabilityProfile.disabledActions
@@ -240,6 +246,8 @@ export const wireCpConfigSchema = z
     txUpdatedMeterValues: z.boolean().optional(),
     inboundValidation: z.enum(["off", "warn", "enforce"]).optional(),
     reservationAuthorizeIdTag: z.boolean().optional(),
+    meterValueDecimalSeparator: z.enum([".", ","]).optional(),
+    emptyMeterValues: z.boolean().optional(),
     capabilityProfile: z
       .object({
         disabledActions: z.array(STR_256).optional(),

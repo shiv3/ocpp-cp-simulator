@@ -189,6 +189,21 @@ export function parseSoapSecurityFlag(
     case "--reservation-authorize-id-tag":
       s.reservationAuthorizeIdTag = true;
       break;
+    case "--meter-value-decimal-separator": {
+      const value = requireFlagValue("--meter-value-decimal-separator", next);
+      if (value !== "." && value !== ",") {
+        process.stderr.write(
+          'Error: --meter-value-decimal-separator must be "." or ","\n',
+        );
+        process.exit(1);
+      }
+      s.meterValueDecimalSeparator = value;
+      cur.i++;
+      break;
+    }
+    case "--empty-meter-values":
+      s.emptyMeterValues = true;
+      break;
     default:
       return false;
   }

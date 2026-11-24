@@ -4,6 +4,7 @@ import {
   soapCallbackUrlSuffixWarning,
 } from "../soapCallbackUrl";
 import { isSoapVersion } from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
+import { meterQuirksProblem } from "@ocpp-cp-simulator/core/cp/domain/connector/meterQuirks";
 import { hasIdPatternPlaceholder } from "@ocpp-cp-simulator/contracts/index";
 import {
   labelsSchema,
@@ -630,6 +631,13 @@ export function parseArgs(argv: string[]): CLIOptions {
       `SOAP callback URL resolved from --soap-public-base-url: ${resolvedSoapCallbackUrl}\n`,
     );
   }
+  // #1133: a comma cannot be written into a 2.x JSON number (#1134: nor
+  // emptied on a SOAP 1.2 / 1.5 MeterValues).
+  const quirksProblem = meterQuirksProblem(s.ocppVersion ?? "OCPP-1.6J", s);
+  if (quirksProblem) {
+    process.stderr.write(`Error: ${quirksProblem}\n`);
+    process.exit(1);
+  }
   if (isSoapVersion(s.ocppVersion) && resolvedSoapCallbackUrl) {
     const suffixWarning = soapCallbackUrlSuffixWarning(resolvedSoapCallbackUrl);
     if (suffixWarning) {
@@ -718,6 +726,10 @@ export function parseArgs(argv: string[]): CLIOptions {
     ...(s.reservationAuthorizeIdTag
       ? { reservationAuthorizeIdTag: s.reservationAuthorizeIdTag }
       : {}),
+    ...(s.meterValueDecimalSeparator
+      ? { meterValueDecimalSeparator: s.meterValueDecimalSeparator }
+      : {}),
+    ...(s.emptyMeterValues ? { emptyMeterValues: true } : {}),
     ...(Object.keys(s.reconnect).length > 0 || Object.keys(s.wsFlags).length > 0
       ? {
           transport: parseTransportFlags(s.reconnect, s.wsFlags, s.ocppVersion),

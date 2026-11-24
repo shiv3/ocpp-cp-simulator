@@ -126,6 +126,18 @@ export const cpParamsBaseSchema = z.object({
     .describe(
       "OCPP 1.6 only: authorize the idTag of a ReserveNow (local rules, then Authorize.req) before accepting it; a tag that is not Accepted answers Rejected. Defaults to false",
     ),
+  meterValueDecimalSeparator: z
+    .enum([".", ","])
+    .optional()
+    .describe(
+      'OCPP 1.6 only (JSON and SOAP): the decimal separator of every SampledValue.value the station sends (MeterValues, StopTransaction.transactionData). "." (default) is the wire as before; "," sends "112,5" instead of "112.5", as some field charge points do (#1133). Refused (invalid_params) for OCPP 2.x, where the value is a JSON number, and for OCPP 1.2 / 1.5. cp.update without it keeps the current value',
+    ),
+  emptyMeterValues: z
+    .boolean()
+    .optional()
+    .describe(
+      "Negative testing (#1134): the periodic and clock-aligned meter samples of a running transaction go out with an empty sampledValue list (1.6 MeterValues; 2.x MeterValues or TransactionEvent.meterValue). Deliberately non-conformant (sampledValue has minItems 1): the frame is sent and the outbound schema warning logged. Refused for OCPP 1.2 / 1.5. Defaults to false; cp.update without it keeps the current value",
+    ),
   capabilityProfile: z
     .object({
       disabledActions: z

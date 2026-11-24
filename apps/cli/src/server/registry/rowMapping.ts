@@ -57,6 +57,8 @@ export interface ChargePointRow {
   tx_updated_meter_values: number | null;
   inbound_validation: string | null;
   reservation_authorize_id_tag: number | null;
+  meter_value_decimal_separator: string | null;
+  empty_meter_values: number | null;
   capability_profile: string | null;
   charger_capabilities: string | null;
   transport_options: string | null;
@@ -309,6 +311,9 @@ export function preserveOmittedInit(
     inboundValidation: next.inboundValidation ?? existing.inboundValidation,
     reservationAuthorizeIdTag:
       next.reservationAuthorizeIdTag ?? existing.reservationAuthorizeIdTag,
+    meterValueDecimalSeparator:
+      next.meterValueDecimalSeparator ?? existing.meterValueDecimalSeparator,
+    emptyMeterValues: next.emptyMeterValues ?? existing.emptyMeterValues,
     transport: next.transport ?? existing.transport,
     capabilityProfile: next.capabilityProfile ?? existing.capabilityProfile,
     chargerCapabilities:

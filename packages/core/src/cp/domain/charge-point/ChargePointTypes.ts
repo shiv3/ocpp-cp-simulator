@@ -1,6 +1,7 @@
 import type { ChargerCapabilities } from "./ChargerCapabilities";
 import type { ChargePointCapabilityProfile } from "./CapabilityProfile";
 import type { ModemConfig } from "../modem/CellularModem";
+import type { MeterValueDecimalSeparator } from "../connector/meterQuirks";
 import type {
   IdTokenTypeName,
   TransactionChargingState,
@@ -300,4 +301,17 @@ export interface ChargePointTransportOptions {
    * `Rejected` (#595). Default `false`.
    */
   readonly reservationAuthorizeIdTag?: boolean;
+  /**
+   * #1133: the decimal separator of every OCPP 1.6 `SampledValue.value` the
+   * station sends (JSON and SOAP). Default `"."`; `","` is refused on any
+   * other version (the constructor throws).
+   */
+  readonly meterValueDecimalSeparator?: MeterValueDecimalSeparator;
+  /**
+   * #1134: the periodic and clock-aligned samples of a running transaction go
+   * out with an empty `sampledValue` list. Deliberately non-conformant
+   * (`minItems: 1`); the frame is sent and the outbound schema warning logged.
+   * Default `false`.
+   */
+  readonly emptyMeterValues?: boolean;
 }

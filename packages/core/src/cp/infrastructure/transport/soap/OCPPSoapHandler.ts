@@ -88,7 +88,7 @@ import {
 import {
   OCPP12_WIRE_PROFILE,
   OCPP15_WIRE_PROFILE,
-  OCPP16_WIRE_PROFILE,
+  ocpp16WireProfile,
   type ClientWireProfile,
 } from "./soapWireProfiles";
 import type {
@@ -150,7 +150,7 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
       return OCPP12_WIRE_PROFILE;
     }
     if (version === OCPP_1_6_SOAP) {
-      return OCPP16_WIRE_PROFILE;
+      return ocpp16WireProfile(this._chargePoint.meterQuirks);
     }
     // Default to 1.5 for any SOAP version we haven't explicitly specialized.
     return OCPP15_WIRE_PROFILE;

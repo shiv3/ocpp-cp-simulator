@@ -73,6 +73,8 @@ export function getStatus(host: CpStatusHost): ChargePointStatus {
       txUpdatedMeterValues: host.init.txUpdatedMeterValues,
       inboundValidation: host.init.inboundValidation,
       reservationAuthorizeIdTag: host.init.reservationAuthorizeIdTag,
+      meterValueDecimalSeparator: host.init.meterValueDecimalSeparator,
+      emptyMeterValues: host.init.emptyMeterValues,
       capabilityProfile: host.init.capabilityProfile,
       transport: host.init.transport,
       chargerCapabilities: host.init.chargerCapabilities,

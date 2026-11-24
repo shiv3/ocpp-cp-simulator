@@ -58,7 +58,8 @@ export function restoreFromDatabase(
       "tls_ca_path, tls_cert_path, tls_key_path, " +
       "basic_auth, boot_notif, created_at, labels, behaviors, behavior_params, tx_updated_meter_values, " +
       "inbound_validation, capability_profile, charger_capabilities, " +
-      "transport_options, reservation_authorize_id_tag " +
+      "transport_options, reservation_authorize_id_tag, " +
+      "meter_value_decimal_separator, empty_meter_values " +
       "FROM charge_points ORDER BY created_at ASC",
   );
   const restored: string[] = [];
@@ -146,6 +147,11 @@ export function restoreFromDatabase(
       ...(row.reservation_authorize_id_tag === 1
         ? { reservationAuthorizeIdTag: true }
         : {}),
+      // #1133 / #1134: NULL (or a row older than the columns) is the default.
+      ...(row.meter_value_decimal_separator === ","
+        ? { meterValueDecimalSeparator: "," as const }
+        : {}),
+      ...(row.empty_meter_values === 1 ? { emptyMeterValues: true } : {}),
       // #609: NULL restores the built-in behaviour.
       ...restoreTransport(row),
       // #618: NULL, or JSON this build cannot read, restores as no profile.

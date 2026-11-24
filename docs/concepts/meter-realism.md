@@ -1,7 +1,7 @@
 ---
 title: Meter realism
 type: concept
-summary: Opt-in, seeded realism of the meter a connector reports — fluctuation, power ramp-up, independent phases with line-to-neutral and line-to-line voltages, Interval and Export measurands, SampledValue overrides and units — and the station main meter on connector 0 / EVSE 0; everything is absent by default and the default MeterValues stay byte-identical.
+summary: Opt-in, seeded realism of the meter a connector reports — fluctuation, power ramp-up, independent phases with line-to-neutral and line-to-line voltages, Interval and Export measurands, SampledValue overrides and units — the station main meter on connector 0 / EVSE 0, and two wire quirks (decimal comma, empty sampledValue); everything is absent by default and the default MeterValues stay byte-identical.
 sources:
   - packages/core/src/cp/domain/connector/MeterRealism.ts
   - packages/core/src/cp/domain/connector/OperatingPoint.ts
@@ -11,13 +11,15 @@ sources:
   - packages/core/src/cp/domain/charge-point/ChargerCapabilities.ts
   - packages/contracts/src/chargerCapabilities.ts
   - packages/core/src/cp/domain/connector/__tests__/Connector.meterRealism.test.ts
-  - "issues #614, #615, #616, #617"
+  - packages/core/src/cp/domain/connector/meterQuirks.ts
+  - packages/core/src/cp/infrastructure/transport/__tests__/meterValueQuirks.bun.test.ts
+  - "issues #614, #615, #616, #617, #1133, #1134"
 related:
   - scenario-format.md
   - control-plane.md
   - state-persistence.md
   - ocpp-versions-and-transports.md
-updated: 2026-11-09
+updated: 2026-11-25
 ---
 
 # Meter realism
@@ -98,6 +100,32 @@ import or export. They are runtime state, not persisted. It is sent with
 connector 0, and with every clock-aligned sample. A DC connector's conversion
 efficiency (#608) enters here: the main meter reads each connector's AC input,
 `delivered / efficiency` ([Power sharing](power-sharing.md#dc-conversion-efficiency)).
+
+## Wire quirks (#1133, #1134)
+
+Two station options reproduce what some charge points in the field send, so a
+CSMS's meter value parsing can be tested against it. They are not part of
+`chargerCapabilities`: they are top-level station options, set like
+`reservationAuthorizeIdTag` with `cp.create` / `cp.update`
+([parameters](control-plane.md#cpcreate-parameters)), a blueprint's `params`,
+the CLI flags (`--meter-value-decimal-separator`, `--empty-meter-values`,
+[CLI](../entities/cli.md)) and the MCP `cp_create` tool (its schema is
+`cp.create`'s). Both are off by default and persisted with `--state-db`
+(columns `meter_value_decimal_separator`, `empty_meter_values`, schema v32);
+the golden fixtures are unchanged.
+
+| Option                       | Values                 | Effect                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ---------------------------- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `meterValueDecimalSeparator` | `"."` (default), `","` | OCPP 1.6 only (JSON and SOAP 1.6S). `","` spells every numeric `SampledValue.value` the station sends with a decimal comma (`"112.5"` → `"112,5"`): MeterValues (periodic, clock-aligned, trigger, main meter) and every entry of StopTransaction `transactionData`. 1.6 §7.43 types `value` as a string, so the frame stays schema-valid. A signed reading (`format: "SignedData"`) and a fixed override value that is not a plain decimal number are left alone. Refused (`invalid_params` over the control plane, the constructor throws, the CLI exits 1) for OCPP 2.0.1 / 2.1, where `value` is a JSON number, and for the SOAP 1.2 / 1.5 dialects.                   |
+| `emptyMeterValues`           | boolean                | The periodic (`Sample.Periodic`) and clock-aligned (`Sample.Clock`) samples of a connector with a running transaction go out with `sampledValue: []`: 1.6 `MeterValues` (JSON and SOAP 1.6S), 2.x `MeterValues` and `TransactionEvent(Updated).meterValue`. The reading is taken as usual (Interval baselines and signing move on) and its values are dropped. On SOAP 1.6S a sample counts as a transaction's when it carries a `transactionId`. Refused for the SOAP 1.2 / 1.5 dialects (their MeterValues has no list to empty). Trigger, begin / end and idle samples stay filled, and the StopTransaction / `TransactionEvent(Ended)` history keeps its real samples. |
+
+`sampledValue` has `minItems: 1` in the 2.0.1 / 2.1 schemas, so the empty list
+is deliberately non-conformant. The option does not bypass outbound validation:
+like every station CALL, the frame is sent and the codec's warning
+(`Outgoing MeterValues failed v201 schema validation: /meterValue/0/sampledValue must NOT have fewer than 1 items`)
+is logged. The vendored OCA 1.6 schema has no `minItems` there (#1064), so a
+1.6 frame passes without a warning; without the option the station never sends
+an empty MeterValues on 1.6 or 2.x.
 
 ## Limits
 

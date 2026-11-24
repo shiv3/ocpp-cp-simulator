@@ -6,6 +6,11 @@
 import type { StartTransactionRequestV16 } from "@ocpp-cp-simulator/ocpp/index";
 import type { SampledValue } from "../../../domain/connector/MeterValueBuilder";
 import type { Transaction } from "../../../domain/connector/Transaction";
+import {
+  isEmptiedContext,
+  withDecimalSeparator,
+  type MeterQuirks,
+} from "../../../domain/connector/meterQuirks";
 import type {
   ChargePointErrorCode,
   OCPPStatus,
@@ -238,3 +243,34 @@ export const OCPP16_WIRE_PROFILE: ClientWireProfile = {
     return soapPayload(payload);
   },
 };
+
+/**
+ * The OCPP 1.6 SOAP profile of a station with meter value quirks (#1133,
+ * #1134): MeterValues spelled with the station's decimal separator, and the
+ * periodic or clock-aligned sample of a transaction (one that carries a
+ * `transactionId`) sent with an empty `sampledValue` list. The plain profile
+ * when the station has neither.
+ */
+export function ocpp16WireProfile(
+  quirks: MeterQuirks | undefined,
+): ClientWireProfile {
+  if (!quirks || (quirks.decimalSeparator === "." && !quirks.emptyMeterValues))
+    return OCPP16_WIRE_PROFILE;
+  return {
+    ...OCPP16_WIRE_PROFILE,
+    toMeterValuesRequest(connectorId, transactionId, sampledValues, timestamp) {
+      const empty =
+        quirks.emptyMeterValues &&
+        transactionId !== undefined &&
+        isEmptiedContext(sampledValues[0]?.context);
+      return OCPP16_WIRE_PROFILE.toMeterValuesRequest(
+        connectorId,
+        transactionId,
+        empty
+          ? []
+          : withDecimalSeparator(sampledValues, quirks.decimalSeparator),
+        timestamp,
+      );
+    },
+  };
+}

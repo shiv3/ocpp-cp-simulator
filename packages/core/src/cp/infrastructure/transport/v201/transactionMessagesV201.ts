@@ -29,6 +29,7 @@ import {
   type OcmfReading,
 } from "../../../domain/connector/SignedMeterData";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { emptiesSample } from "../../../domain/connector/meterQuirks";
 import { clockOf } from "../../../shared/clock";
 import type { SimClock } from "../../../shared/clock";
 import type { Rng } from "../../../shared/rng";
@@ -54,6 +55,7 @@ export interface TransactionMessagesContext {
     | "getConnector"
     | "holdEnergyOnInvalidId"
     | "mainMeter"
+    | "meterQuirks"
     | "notifyStartTransactionNotAccepted"
     | "ocppVersion"
     | "recordAuthorizationResult"
@@ -520,11 +522,13 @@ export class TransactionMessagesV201 {
         },
         context,
       );
-      if (sampledValue.length > 0) {
+      // #1134: read, then sent empty (minItems 1: the pipeline logs a warning).
+      const empty = emptiesSample(this._chargePoint, connector, context);
+      if (empty || sampledValue.length > 0) {
         meterValue = [
           {
             timestamp,
-            sampledValue: sampledValue as [
+            sampledValue: (empty ? [] : sampledValue) as [
               V201MeterValuesSampledValue,
               ...V201MeterValuesSampledValue[],
             ],
@@ -758,7 +762,10 @@ export class TransactionMessagesV201 {
         context,
       );
     }
-    if (sampledValue.length === 0) {
+    // #1134: read, then sent empty (minItems 1: the pipeline logs a warning).
+    if (emptiesSample(this._chargePoint, connector, context)) {
+      sampledValue = [] as unknown as typeof sampledValue;
+    } else if (sampledValue.length === 0) {
       this._logger.debug(
         `[v2.0.1] sendMeterValue: no sampled values for connector ${connectorId}`,
         LogType.METER_VALUE,

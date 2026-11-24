@@ -79,6 +79,14 @@ Options:
                            (local rules, then Authorize.req) before accepting
                            it; a tag that is not Accepted answers Rejected.
                            Off by default.
+  --meter-value-decimal-separator <.|,>
+                           OCPP 1.6 (JSON and SOAP): decimal separator of every
+                           SampledValue.value sent ("112,5" with ","). Default
+                           "."; refused for OCPP 2.x.
+  --empty-meter-values     Negative testing: the periodic and clock-aligned
+                           meter samples of a running transaction go out with
+                           an empty sampledValue list (non-conformant; the
+                           schema warning is logged). Off by default.
   --reconnect-max-attempts <n>
                            Reconnect attempts after a connection loss before
                            giving up. -1 = unlimited (default), 0 = never

@@ -133,6 +133,7 @@ import type { MonitorEvaluation } from "../monitoring/MonitorEvaluation";
 import type { OcmfMeter } from "../connector/SignedMeterData";
 import { IdTagPool, type IdTagDistribution } from "../auth/IdTagPool";
 import { assertWsClientOptions } from "../../shared/WsClientOptions";
+import { meterQuirksOf, type MeterQuirks } from "../connector/meterQuirks";
 import {
   resolveReconnectPolicy,
   type ReconnectPolicy,
@@ -406,9 +407,7 @@ export class ChargePoint {
     return this._reservationAuthorizeIdTag;
   }
 
-  setReservationAuthorizeIdTag(enabled: boolean): void {
-    this._reservationAuthorizeIdTag = enabled;
-  }
+  readonly meterQuirks: MeterQuirks; // #1133, #1134: fixed at construction
 
   constructor(
     private readonly _id: string,
@@ -449,6 +448,7 @@ export class ChargePoint {
     // Before any state is built: a refused option must not leave a half-made
     // charge point behind.
     const wsClientOptions = assertWsClientOptions(transportOptions.ws);
+    this.meterQuirks = meterQuirksOf(_ocppVersion, transportOptions);
     this._rngSource =
       simulation.seed === undefined
         ? systemRngStreams

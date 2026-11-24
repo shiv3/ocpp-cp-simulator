@@ -91,6 +91,10 @@ export interface ChargePointSnapshot {
     inboundValidation?: "off" | "warn" | "enforce";
     /** #595: OCPP 1.6 ReserveNow authorizes the idTag first. */
     reservationAuthorizeIdTag?: boolean;
+    /** #1133: OCPP 1.6 meter values with a decimal comma. */
+    meterValueDecimalSeparator?: "." | ",";
+    /** #1134: periodic / clock-aligned samples with no sampled values. */
+    emptyMeterValues?: boolean;
     /** #618: static capability profile. */
     capabilityProfile?: {
       disabledActions?: readonly string[];
@@ -169,6 +173,12 @@ export interface CreateChargePointParams {
   /** #595: OCPP 1.6 ReserveNow authorizes the idTag first.
    *  Omitted on an update keeps the current value. */
   reservationAuthorizeIdTag?: boolean;
+  /** #1133: OCPP 1.6 meter values with a decimal comma ("." default).
+   *  Omitted on an update keeps the current value. */
+  meterValueDecimalSeparator?: "." | ",";
+  /** #1134: periodic / clock-aligned samples go out with no sampled values.
+   *  Omitted on an update keeps the current value. */
+  emptyMeterValues?: boolean;
   /** #618: static capability profile (omitted on an update keeps it). */
   capabilityProfile?: {
     disabledActions?: readonly string[];

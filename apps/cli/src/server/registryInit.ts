@@ -1,9 +1,28 @@
 import { isSoapVersion } from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
+import { meterQuirksProblem } from "@ocpp-cp-simulator/core/cp/domain/connector/meterQuirks";
+import { RpcFailure } from "@ocpp-cp-simulator/contracts/errors";
 import type { CreateChargePointParams } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 import type { ChargePointInitOptions } from "../types";
 import type { JsonObject } from "@ocpp-cp-simulator/contracts/behavior";
 
+/**
+ * The init of a `cp.create` / `cp.update`, merged with the existing one for an
+ * update. Refuses (`invalid_params`) meter value quirks the merged version
+ * cannot have (#1133, #1134): checked on the merged options, before an update
+ * tears the old charge point down, so an update to 2.x that keeps a 1.6
+ * decimal comma is refused too.
+ */
 export function toInitOptions(
+  params: CreateChargePointParams,
+  existing?: ChargePointInitOptions,
+): ChargePointInitOptions {
+  const init = mergeInitOptions(params, existing);
+  const problem = meterQuirksProblem(init.ocppVersion ?? "OCPP-1.6J", init);
+  if (problem) throw new RpcFailure("invalid_params", problem);
+  return init;
+}
+
+function mergeInitOptions(
   params: CreateChargePointParams,
   existing?: ChargePointInitOptions,
 ): ChargePointInitOptions {
@@ -54,6 +73,9 @@ export function toInitOptions(
     inboundValidation: params.inboundValidation ?? existing?.inboundValidation,
     reservationAuthorizeIdTag:
       params.reservationAuthorizeIdTag ?? existing?.reservationAuthorizeIdTag,
+    meterValueDecimalSeparator:
+      params.meterValueDecimalSeparator ?? existing?.meterValueDecimalSeparator,
+    emptyMeterValues: params.emptyMeterValues ?? existing?.emptyMeterValues,
     capabilityProfile: params.capabilityProfile ?? existing?.capabilityProfile,
     chargerCapabilities:
       params.chargerCapabilities ?? existing?.chargerCapabilities,

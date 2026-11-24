@@ -154,6 +154,7 @@ import type {
   SessionSettledInfo,
 } from "./service/cliEvents";
 import { attachEventForwarders } from "./service/eventForwarders";
+import { stationOptionsOf } from "./service/stationOptions";
 import {
   getAutoTrafficConfig,
   getAutoTrafficCounters,
@@ -481,9 +482,7 @@ export class CLIChargePointService {
         ...(init.inboundValidation
           ? { inboundValidation: init.inboundValidation }
           : {}),
-        ...(init.reservationAuthorizeIdTag
-          ? { reservationAuthorizeIdTag: true }
-          : {}),
+        ...stationOptionsOf(init),
         ...(init.transport?.reconnect
           ? { reconnect: init.transport.reconnect }
           : {}),
@@ -599,9 +598,7 @@ export class CLIChargePointService {
         ...(options.inboundValidation
           ? { inboundValidation: options.inboundValidation }
           : {}),
-        ...(options.reservationAuthorizeIdTag
-          ? { reservationAuthorizeIdTag: true }
-          : {}),
+        ...stationOptionsOf(options),
         ...(options.capabilityProfile
           ? { capabilityProfile: options.capabilityProfile }
           : {}),

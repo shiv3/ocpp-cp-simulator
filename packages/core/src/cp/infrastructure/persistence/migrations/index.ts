@@ -5,6 +5,7 @@ import { transportOptions } from "./0028-transport-options";
 import { migration0029BehaviorParams } from "./0029-behavior-params";
 import { migration0030ReservationAuthorizeIdTag } from "./0030-reservation-authorize-id-tag";
 import { migration0031ChargerCapabilities } from "./0031-charger-capabilities";
+import { migration0032MeterValueQuirks } from "./0032-meter-value-quirks";
 
 /**
  * Forward migrations 26 and later, one file per version.
@@ -40,6 +41,7 @@ export const MIGRATIONS: readonly Migration[] = [
   migration0029BehaviorParams,
   migration0030ReservationAuthorizeIdTag,
   migration0031ChargerCapabilities,
+  migration0032MeterValueQuirks,
 ];
 
 /** Problems with a migration list; empty when it is well formed. */

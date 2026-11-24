@@ -9,6 +9,7 @@ import type { InboundValidationMode } from "@ocpp-cp-simulator/core/cp/domain/ch
 import type { ChargePointCapabilityProfile } from "@ocpp-cp-simulator/core/cp/domain/charge-point/CapabilityProfile";
 import type { ModemConfig } from "@ocpp-cp-simulator/core/cp/domain/modem/CellularModem";
 import type { ChargerCapabilities } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargerCapabilities";
+import type { MeterValueDecimalSeparator } from "@ocpp-cp-simulator/core/cp/domain/connector/meterQuirks";
 import type { IdTagDistribution } from "@ocpp-cp-simulator/core/cp/domain/auth/IdTagPool";
 import type { Labels } from "@ocpp-cp-simulator/contracts/labels";
 import type { ModemWire } from "@ocpp-cp-simulator/contracts/events";
@@ -259,6 +260,10 @@ export interface CLIOptions {
   readonly inboundValidation?: InboundValidationMode;
   /** `--reservation-authorize-id-tag` (#595). See ChargePointInitOptions. */
   readonly reservationAuthorizeIdTag?: boolean;
+  /** `--meter-value-decimal-separator` (#1133). See ChargePointInitOptions. */
+  readonly meterValueDecimalSeparator?: MeterValueDecimalSeparator;
+  /** `--empty-meter-values` (#1134). See ChargePointInitOptions. */
+  readonly emptyMeterValues?: boolean;
   /** `--reconnect-*` and `--boot-retry-limit` (#609). */
   readonly transport?: TransportConfig;
   readonly capabilityProfile?: ChargePointCapabilityProfile;
@@ -290,6 +295,10 @@ export interface ChargePointInitOptions {
   readonly inboundValidation?: InboundValidationMode;
   /** OCPP 1.6 ReserveNow authorizes the idTag first (#595). Default false. */
   readonly reservationAuthorizeIdTag?: boolean;
+  /** OCPP 1.6 meter values with a decimal comma (#1133). Default ".". */
+  readonly meterValueDecimalSeparator?: MeterValueDecimalSeparator;
+  /** Periodic / clock-aligned samples with no sampled values (#1134). */
+  readonly emptyMeterValues?: boolean;
   /** Transport settings (#609): reconnect policy. Persisted. */
   readonly transport?: TransportConfig;
   readonly capabilityProfile?: ChargePointCapabilityProfile;
@@ -474,6 +483,8 @@ export interface ChargePointStatus {
     readonly txUpdatedMeterValues?: boolean;
     readonly inboundValidation?: InboundValidationMode;
     readonly reservationAuthorizeIdTag?: boolean;
+    readonly meterValueDecimalSeparator?: MeterValueDecimalSeparator;
+    readonly emptyMeterValues?: boolean;
     readonly capabilityProfile?: ChargePointCapabilityProfile;
     readonly transport?: TransportConfig;
     readonly chargerCapabilities?: ChargerCapabilities;

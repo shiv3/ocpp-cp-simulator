@@ -56,6 +56,8 @@ export function toChargePointSnapshot(
           txUpdatedMeterValues: status.config.txUpdatedMeterValues,
           inboundValidation: status.config.inboundValidation,
           reservationAuthorizeIdTag: status.config.reservationAuthorizeIdTag,
+          meterValueDecimalSeparator: status.config.meterValueDecimalSeparator,
+          emptyMeterValues: status.config.emptyMeterValues,
           capabilityProfile: status.config.capabilityProfile,
           ...(status.config.transport === undefined
             ? {}

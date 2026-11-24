@@ -758,17 +758,15 @@ function mergeUpdateParams(
   preserveWhenMissing(merged, "securityProfile", init.securityProfile);
   preserveWhenMissing(merged, "authorizationKey", init.authorizationKey);
   preserveWhenMissing(merged, "cpoName", init.cpoName);
-  preserveWhenMissing(
-    merged,
-    "txUpdatedMeterValues",
-    init.txUpdatedMeterValues,
-  );
   preserveWhenMissing(merged, "inboundValidation", init.inboundValidation);
-  preserveWhenMissing(
-    merged,
+  for (const key of [
+    "txUpdatedMeterValues",
     "reservationAuthorizeIdTag",
-    init.reservationAuthorizeIdTag,
-  );
+    "meterValueDecimalSeparator", // #1133
+    "emptyMeterValues", // #1134
+  ] as const) {
+    preserveWhenMissing(merged, key, init[key]);
+  }
   preserveWhenMissing(merged, "capabilityProfile", init.capabilityProfile);
   preserveWhenMissing(merged, "chargerCapabilities", init.chargerCapabilities);
   preserveWhenMissing(merged, "modem", init.modem);

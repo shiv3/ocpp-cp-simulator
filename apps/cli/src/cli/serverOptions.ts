@@ -5,6 +5,7 @@ import {
   type VehicleCatalogConfig,
 } from "../vehicleCatalogConfig";
 import { isLoopbackHost } from "./flagValues";
+import { stationOptionsOf } from "../service/stationOptions";
 
 /**
  * #458: the daemon's Open EV Directory settings, from the flags and the
@@ -134,9 +135,7 @@ export function buildBootstrap(
     ...(options.inboundValidation
       ? { inboundValidation: options.inboundValidation }
       : {}),
-    ...(options.reservationAuthorizeIdTag
-      ? { reservationAuthorizeIdTag: true }
-      : {}),
+    ...stationOptionsOf(options),
     ...(options.transport ? { transport: options.transport } : {}),
     ...((options.useBehaviors?.length ?? 0) > 0
       ? { behaviors: [...options.useBehaviors!] }

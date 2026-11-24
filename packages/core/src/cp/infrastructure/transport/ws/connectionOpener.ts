@@ -14,6 +14,7 @@ import {
   SUPERSEDED_CLOSE,
   type ConnectErrorDetail,
 } from "./closeClassification";
+import { checkSelectedSubprotocol } from "../profile/subprotocols";
 import type { OcppWebSocketHost } from "./socketHost";
 
 export class ConnectionOpener {
@@ -67,7 +68,28 @@ export class ConnectionOpener {
     const attempt = this.host.clientCerts.nextTlsOptions();
     this.host.connectionClientCertificate = attempt.tls?.cert;
     let opened = false;
+    // Per attempt, so a late open cannot be judged by a newer attempt's state.
+    let offeredProtocols: ReadonlyArray<string> = [];
+    let attemptSocket: OcppSocket | null = null;
     const onopenHandler = () => {
+      // #1061: the CSMS must have picked one of the versions offered. If it
+      // did not, the connection has no agreed OCPP version: close it (1002,
+      // protocol error) and report it as a failed attempt, not an open one.
+      // A socket that does not expose `protocol` (a test double) cannot be
+      // checked; every real client answers a string, "" for none.
+      const selected = attemptSocket?.protocol;
+      const check = checkSelectedSubprotocol(
+        selected === undefined ? [] : offeredProtocols,
+        selected ?? "",
+      );
+      if (check.kind === "missing" || check.kind === "mismatch") {
+        this.host.logger.error(
+          `${check.message}; closing the connection`,
+          LogType.WEBSOCKET,
+        );
+        attemptSocket?.close(1002, "No matching WebSocket subprotocol");
+        return;
+      }
       opened = true;
       this.host.securityProfileFallback = null;
       this.clearHandshakeTimer();
@@ -161,6 +183,7 @@ export class ConnectionOpener {
         warn: (message) => this.host.logger.warn(message, LogType.WEBSOCKET),
         onConnectOptions: (options) => {
           this.host.lastConnectOptions = options;
+          offeredProtocols = options.protocols;
         },
         onopen: onopenHandler,
         onmessage: onmessageHandler,
@@ -189,6 +212,7 @@ export class ConnectionOpener {
         this.host.attemptReconnect();
       return;
     }
+    attemptSocket = this.host.ws;
     this.host.socketToken = socketToken;
     this.armHandshakeTimer(this.host.ws);
   }

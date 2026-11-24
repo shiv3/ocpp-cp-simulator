@@ -4,7 +4,7 @@ export {
   validateOCPPPayload,
   validationErrors,
   strictValidationErrors,
-} from "../validate";
-export * from "./v16";
-export * from "./v201";
-export * from "./v21";
+} from "../validate.js";
+export * from "./v16/index.js";
+export * from "./v201/index.js";
+export * from "./v21/index.js";

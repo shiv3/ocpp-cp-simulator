@@ -8,6 +8,7 @@ import {
   cpLabelsSetParamsSchema,
   cpListParamsSchema,
   createParamsSchema,
+  cpProbeParamsSchema,
   METHODS,
 } from "@ocpp-cp-simulator/contracts/index";
 import { runRpc } from "../../socketServer";
@@ -57,6 +58,25 @@ export function registerCpTools(
       try {
         const result = await runRpc(deps, {
           method: "cp.create",
+          params: args,
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  // #1132: the schema is `cp.probe`'s, which is `cp.create`'s plus timeoutMs,
+  // so an agent can probe with the body it is about to create.
+  mcp.tool("cp_probe", {
+    description:
+      "Check whether a charge point with these settings would get into the CSMS, without creating it: opens one WebSocket handshake exactly as the station would (id appended to the URL, the OCPP subprotocol, Basic Auth / security profile, TLS), then closes it. No OCPP message is sent and nothing is stored. Takes the cp_create parameters (plus timeoutMs) and returns a verdict { ok, code, stage, url, message, hint?, httpStatus? }; code is e.g. ok, dns_failure, connection_refused, timeout, tls_untrusted_certificate, credentials_refused, path_not_found, csms_busy, not_websocket, subprotocol_not_agreed. A refused connection is a normal result (ok: false), not an error.",
+    inputSchema: cpProbeParamsSchema,
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          method: "cp.probe",
           params: args,
         });
         return successResult(result);

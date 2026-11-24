@@ -12,6 +12,10 @@ import { labelsSchema } from "../labels";
 import { modemConfigSchema } from "../modem";
 import { transportConfigSchema } from "../transportConfig";
 import {
+  CONNECTION_PROBE_DEFAULT_TIMEOUT_MS,
+  CONNECTION_PROBE_MAX_TIMEOUT_MS,
+} from "../connectionProbe";
+import {
   CONN_POS,
   NON_EMPTY_STR,
   OBJ,
@@ -276,6 +280,24 @@ export const createParamsSchema = cpParamsBaseSchema.extend({
     .optional()
     .describe(
       "Basic auth credentials for the CSMS link. Prefer securityProfile + authorizationKey for OCPP 1.6 security profiles",
+    ),
+});
+
+/**
+ * `cp.probe` (#1132): everything `cp.create` accepts, so a caller can probe
+ * with the very body it is about to create. Only the connection fields are
+ * read (URL, id, version, Basic Auth, security profile, TLS, `transport.ws`);
+ * the rest is accepted and ignored. Nothing is created.
+ */
+export const cpProbeParamsSchema = createParamsSchema.extend({
+  timeoutMs: z
+    .number()
+    .int()
+    .min(100)
+    .max(CONNECTION_PROBE_MAX_TIMEOUT_MS)
+    .optional()
+    .describe(
+      `Handshake budget in ms (default ${CONNECTION_PROBE_DEFAULT_TIMEOUT_MS}, at most ${CONNECTION_PROBE_MAX_TIMEOUT_MS}); transport.ws.handshakeTimeoutMs is used when this is omitted`,
     ),
 });
 

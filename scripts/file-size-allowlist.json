@@ -4,7 +4,7 @@
   "apps/cli/src/server/RegistryChargePointService.ts": 1089,
   "apps/cli/src/server/rpc/cpProvisioning.ts": 822,
   "apps/cli/src/server/rpc/facadeCpCommands.ts": 819,
-  "apps/cli/src/server/socketServer.ts": 1022,
+  "apps/cli/src/server/socketServer.ts": 1021,
   "apps/cli/src/service.ts": 1961,
   "apps/web/src/components/Settings.tsx": 807,
   "apps/web/src/components/ui/log-viewer.tsx": 833,

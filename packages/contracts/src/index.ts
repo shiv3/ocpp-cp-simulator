@@ -12,10 +12,12 @@ export * from "./envelope";
 export * from "./vehicle";
 export * from "./labels";
 export * from "./chargerCapabilities";
+export * from "./connectionProbe";
 export {
   METHODS,
   EXPLICIT_METHODS,
   createParamsSchema,
+  cpProbeParamsSchema,
   cpListParamsSchema,
   cpLabelsSetParamsSchema,
   cpBehaviorsSetParamsSchema,

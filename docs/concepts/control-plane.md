@@ -27,7 +27,7 @@ related:
   - charging-sessions.md
   - local-authorization.md
   - fleet-templates.md
-updated: 2026-11-21
+updated: 2026-11-25
 ---
 
 # Socket.IO control plane
@@ -772,6 +772,72 @@ repeated a long input would otherwise push the batch's ack past the result
 schema and turn the promised per-item report into an opaque `internal` — after
 every charge point had already been created.
 
+#### `cp.probe` — connection check before creating (#1132)
+
+`cp.probe` answers "would a station with these settings get in?" without
+creating one. It takes the [cp.create parameters](#cpcreate-parameters) (so a
+caller can probe with the body it is about to create) plus
+`timeoutMs?` (100–15000, default 8000; `transport.ws.handshakeTimeoutMs`
+stands in when omitted). Only the connection fields are read: `cpId`, `wsUrl`,
+`ocppVersion`, `basicAuth`, `securityProfile` / `authorizationKey`,
+`tls` / `tls*Path` and `transport.ws`; the rest is accepted and ignored.
+
+It opens **one** WebSocket handshake exactly as the charge point would (the
+same `openOcppWebSocket` path: id appended as the last path segment,
+`Sec-WebSocket-Protocol` of the version, Basic Auth / security-profile header,
+TLS material, `transport.ws` options) and closes it with 1000 as soon as it
+opens. **No OCPP message is sent; nothing is created, persisted or logged
+against a charge point.** A `wsUrl` list is cut to its first URL, with a
+warning. When the client hides the status of a refused upgrade (Bun), the
+probe makes the same one diagnostic GET as the charge point's refusal log
+(#288); when Bun reports a refused port and an unknown host alike, it
+resolves the name to tell them apart.
+
+A refused connection is the **result** (`ok: false`), not an RPC error. Only
+params that cannot describe an OCPP-J station answer `invalid_params`: a SOAP
+or unknown `ocppVersion`, an unreadable `tls*Path` (or a key file readable by
+group / other without `--insecure-tls-key-perms`), or a `transport.ws` option
+the daemon's runtime cannot honour. The result
+(`packages/contracts/src/connectionProbe.ts`):
+
+| Field                 | Meaning                                                                                                                                                                                                                        |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ok`                  | `true` only for `code: "ok"`                                                                                                                                                                                                   |
+| `code`                | Stable machine-readable outcome, table below                                                                                                                                                                                   |
+| `stage`               | How far it got: `config`, `dns`, `tcp`, `tls`, `upgrade`, `subprotocol`, `handshake` (cannot tell), `open`                                                                                                                     |
+| `url`                 | The URL dialled (id and `pathSuffix` included); a `user:password@` password reads `[redacted]`                                                                                                                                 |
+| `message`, `hint?`    | What happened, and the operator's next move                                                                                                                                                                                    |
+| `httpStatus?`         | Status of a refused upgrade                                                                                                                                                                                                    |
+| `location?`           | Target of a redirect, redacted                                                                                                                                                                                                 |
+| `offeredSubprotocols` | The `Sec-WebSocket-Protocol` values offered                                                                                                                                                                                    |
+| `subprotocol?`        | The one the CSMS agreed to (`ok` only)                                                                                                                                                                                         |
+| `durationMs`          | Wall-clock time of the check                                                                                                                                                                                                   |
+| `warnings`            | Configuration warnings: a `ws://` promoted to `wss://` (profiles 2/3), profile 1 over `ws://`, a disabled certificate check, a URL that already ends with the charge point id (the id would be appended twice), a cut URL list |
+
+| `code`                      | `stage`       | When                                                                                                                                                                                                       |
+| --------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ok`                        | `open`        | The WebSocket opened with an offered subprotocol                                                                                                                                                           |
+| `invalid_url`               | `config`      | `wsUrl` does not parse, or is not `ws://` / `wss://`                                                                                                                                                       |
+| `invalid_security_profile`  | `config`      | Profile 1/2 without `authorizationKey`, profile 3 without client certificate and key                                                                                                                       |
+| `dns_failure`               | `dns`         | The host name does not resolve                                                                                                                                                                             |
+| `connection_refused`        | `tcp`         | Nothing accepted the TCP connection                                                                                                                                                                        |
+| `host_unreachable`          | `tcp`         | No route to the host (`EHOSTUNREACH` / `ENETUNREACH`)                                                                                                                                                      |
+| `timeout`                   | `handshake`   | No handshake completed within `timeoutMs`                                                                                                                                                                  |
+| `tls_untrusted_certificate` | `tls`         | The CSMS certificate did not verify (reported by the Node `ws` path and Bun 1.4.4+ as a certificate error code)                                                                                            |
+| `tls_failed`                | `tls`         | Any other TLS failure, or a reset during a `wss://` handshake (a refused client certificate). Bun 1.4.3 and earlier do not say why a TLS handshake failed, so an untrusted certificate reads as this there |
+| `credentials_refused`       | `upgrade`     | HTTP 401 / 403                                                                                                                                                                                             |
+| `path_not_found`            | `upgrade`     | HTTP 404: the CSMS does not know the id at this path                                                                                                                                                       |
+| `csms_busy`                 | `upgrade`     | HTTP 429 / 503                                                                                                                                                                                             |
+| `redirected`                | `upgrade`     | HTTP 3xx; `location` names the target                                                                                                                                                                      |
+| `upgrade_refused`           | `upgrade`     | Any other refusal status, or a refusal whose status could not be learned                                                                                                                                   |
+| `not_websocket`             | `upgrade`     | A 2xx answer, or a reply that is not HTTP: the URL reaches a web server, not a WebSocket endpoint                                                                                                          |
+| `subprotocol_not_agreed`    | `subprotocol` | The CSMS agreed to no offered subprotocol, or to one that was not offered                                                                                                                                  |
+| `connection_failed`         | `handshake`   | Anything the transport cannot classify                                                                                                                                                                     |
+
+The MCP tool is `cp_probe` ([MCP endpoint](../entities/mcp-endpoint.md)); the
+CLI runs the same check in-process or on a daemon with
+[`ocpp-cp-sim cp probe`](../entities/cli.md#cp-probe).
+
 #### Transaction event parameters
 
 Since #335 the OCPP 2.0.1 `TransactionEvent` builder no longer fixes
@@ -865,6 +931,7 @@ Guarantees a conformance driver can rely on:
 | `cp.list`                                                            | `{ "labels"?: object }`                                                                                                                           | Array of redacted CP registry items; `labels` keeps only the CPs carrying every pair ([Charge-point labels](#charge-point-labels)).                                                                                                                                                                                                                                                                       |
 | `cp.create`                                                          | See [cp.create parameters](#cpcreate-parameters) below                                                                                            | Create a CP; `autoConnect: true` connects it after creation.                                                                                                                                                                                                                                                                                                                                              |
 | `cp.create_many`                                                     | See [cp.create_many](#cpcreate_many--the-batch-fields) below                                                                                      | Create N CPs sharing every parameter but the generated id. Partial success is a normal result.                                                                                                                                                                                                                                                                                                            |
+| `cp.probe`                                                           | See [cp.probe](#cpprobe--connection-check-before-creating-1132) below                                                                             | One handshake with the station's settings, then closed; no OCPP message, nothing created. The verdict `{ ok, code, stage, url, message, hint?, … }` is the result.                                                                                                                                                                                                                                        |
 | `blueprint.list` / `.save` / `.delete`                               | See [Blueprints](#blueprints) below                                                                                                               | Named, reusable CP hardware descriptions; instantiate with `cp.create_many { blueprintId }`.                                                                                                                                                                                                                                                                                                              |
 | `fleet.template.list` / `.get` / `.save` / `.delete`, `fleet.create` | See [Fleet templates](fleet-templates.md)                                                                                                         | Describe a heterogeneous fleet once (blueprint, scenario, EV, network simulation, labels per charge point) and instantiate it; partial success is a normal result of `fleet.create`.                                                                                                                                                                                                                      |
 | `cp.update`                                                          | Same as `cp.create`                                                                                                                               | Replace an existing CP config and **rebuild** the CP (its socket closes); `autoConnect: true` reconnects it after update. Omitted `labels` are kept.                                                                                                                                                                                                                                                      |

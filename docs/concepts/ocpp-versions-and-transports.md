@@ -41,7 +41,7 @@ related:
   - operational-timeline.md
   - expert-ocpp-calls.md
   - variable-monitoring.md
-updated: 2026-11-21
+updated: 2026-11-24
 ---
 
 # OCPP versions and transports
@@ -227,6 +227,21 @@ including a canary for the two options Bun ignores: if a Bun release starts
 honouring one, that test fails and the matrix in
 [`WsClientOptions.ts`](../../packages/core/src/cp/shared/WsClientOptions.ts)
 is corrected.
+
+## Subprotocol the CSMS selected (#1061)
+
+The station offers `Sec-WebSocket-Protocol` (`ocpp1.6`, `ocpp2.0.1` or `ocpp2.1` for the configured version, plus any `--ws-subprotocol` extras; `transport.ws.subprotocols` replaces the list). When the WebSocket opens, the simulator compares the subprotocol the server selected (`ws.protocol`) with that offered list, exactly and case-sensitively, before it reports the connection open.
+
+| Selected                                     | Offered list                  | Behavior                                                                                                                                                                                                                                                                                                                       |
+| -------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| one of the offered names                     | non-empty                     | Unchanged: the connection opens.                                                                                                                                                                                                                                                                                               |
+| nothing (no `Sec-WebSocket-Protocol` header) | non-empty                     | An `[ERROR]` line `The CSMS selected no WebSocket subprotocol (offered: …); closing the connection`, then the socket is closed with code 1002 and reason `No matching WebSocket subprotocol`. `onopen` never fires and the attempt is a failed one, so the [reconnect policy](#reconnect-policy-and-retrybackoff-609) applies. |
+| a name that was not offered                  | non-empty                     | The same, with `The CSMS selected the WebSocket subprotocol "…", which was not offered (offered: …); closing the connection`.                                                                                                                                                                                                  |
+| anything                                     | empty (`ws.subprotocols: []`) | Not checked: nothing was offered, so there is nothing to select.                                                                                                                                                                                                                                                               |
+
+**What the specification says.** OCPP-J Part 4 §3.1.2 (OCPP-J 1.6 §3.1.2 and Part 4 of 2.0.1 / 2.1) governs the `Sec-WebSocket-Protocol` negotiation. The Part 4 text is not in the offline specification set used for this wiki, so it is not quoted here; what the set does contain is the CSMS conformance test TC_B_58 (Part 6, 2.0.1 and 2.1): "OCPP-J imposes extra constraints on the WebSocket subprotocol, detailed in the following section 3.1.2", and the upgrade response "must contain the header Sec-Websocket-Protocol", formatted as `Sec-WebSocket-Protocol: ocpp<Selected OCPP version>`. The station-side rule is not spelled out in that set, so the simulator takes the conservative reading: a connection with no agreed OCPP version is not used, it is closed with the WebSocket protocol-error code (1002).
+
+Bun's client and the Node `ws` client already refuse some of these themselves (Bun: close 1002 `Mismatch client protocol` for a missing selection; `ws`: an error); browsers accept a missing selection, and Bun accepts a foreign one. This check makes the behavior the same on every runtime. Source: `ws/connectionOpener.ts`, `checkSelectedSubprotocol` in `profile/subprotocols.ts`.
 
 ## WebSocket ping (`WebSocketPingInterval`)
 

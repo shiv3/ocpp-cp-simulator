@@ -417,5 +417,5 @@ All are sub-issues of #978.
 | 3 — transports          | #1056                                                                       | Network faults as an injected link decorator; `ChargePointSocket` split                                |
 | 3 — transports          | #1057                                                                       | Extract `ocpp-transport-ws`                                                                            |
 | 3 — transports          | #1058                                                                       | Extract `ocpp-transport-soap`                                                                          |
-| 3 — transports          | [#1061](https://github.com/shiv3/ocpp-cp-simulator/issues/1061)             | Verify the negotiated subprotocol after open                                                           |
+| 3 — transports          | [#1061](https://github.com/shiv3/ocpp-cp-simulator/issues/1061)             | Verify the negotiated subprotocol after open (done)                                                    |
 | 4 — independent use     | #1063                                                                       | Standalone station and CSMS examples from packed tarballs (blocked by #1053, #1057, #1058)             |

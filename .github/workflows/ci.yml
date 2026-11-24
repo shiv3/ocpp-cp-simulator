@@ -80,6 +80,14 @@ jobs:
       - name: CLI sidecar compiles (release smoke)
         run: bun build --compile --outfile=/tmp/ocpp-cp-sim-smoke apps/cli/src/main.ts
 
+      # #1053: packages/ocpp is meant to be published on its own. Build it,
+      # pack it, install the tarball with npm into a throwaway project outside
+      # the workspace, import every public entry point under Node and Bun,
+      # validate a message per OCPP version and type-check a consumer with
+      # `module: nodenext`. Nothing is published.
+      - name: ocpp package installs outside the workspace
+        run: bun run check:ocpp-pack
+
       # No CI job used to touch the npm tarball at all — the only checks on it
       # lived in cli-release.yml and ran on the `cli-v*` tag, so a PR that
       # broke packaging stayed green and the breakage surfaced weeks later at

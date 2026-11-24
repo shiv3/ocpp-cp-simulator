@@ -59,6 +59,7 @@
     "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
     "typecheck": "tsc -b",
     "check:boundaries": "bun run scripts/check-package-boundaries.ts && bun run scripts/check-direct-time.ts && bun run scripts/check-single-writer.ts && bun run scripts/check-file-size.ts",
+    "check:ocpp-pack": "bun run scripts/check-ocpp-pack.ts",
     "preview": "vite preview",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -70,6 +71,7 @@
     "cli": "bun apps/cli/src/main.ts",
     "fetch:ocpp": "bash scripts/fetch-ocpp-schemas.sh",
     "gen:ocpp": "bun run scripts/generate-ocpp.ts",
+    "build:ocpp": "bun run scripts/build-ocpp-package.ts",
     "gen:k6-runtime": "bun run scripts/generate-k6-runtime.ts"
   },
   "dependencies": {

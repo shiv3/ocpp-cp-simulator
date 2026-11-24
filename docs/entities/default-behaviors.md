@@ -1,7 +1,7 @@
 ---
 title: Default behaviors
 type: entity
-summary: What the station does by default for each inbound CSMS action, per OCPP version — the nine built-in behaviors, the follow-up each one runs, what ends it, the params five of them take (firmware and logs add the opt-in lifecycles of #600 and #601), and the actions that have no default and can only be replaced.
+summary: What the station does by default for each inbound CSMS action, per OCPP version — the nine built-in behaviors, the follow-up each one runs, what ends it, the params six of them take (firmware and logs add the opt-in lifecycles of #600 and #601), and the actions that have no default and can only be replaced.
 sources:
   - packages/core/src/cp/application/engine/behaviors/
   - packages/core/src/cp/application/behavior/paramsSchema.ts
@@ -18,6 +18,7 @@ sources:
   - "issue #711"
   - "issue #712"
   - "issue #721"
+  - "issue #1135"
   - "issue #731"
   - "issue #739"
   - "issue #740"
@@ -32,7 +33,7 @@ related:
   - ../analyses/scenario-or-behavior.md
   - cli.md
   - ../concepts/scenario-format.md
-updated: 2026-11-15
+updated: 2026-11-25
 ---
 
 # Default behaviors
@@ -71,7 +72,7 @@ defaults is not persisted; the statuses they report are.
 
 ## Params
 
-Five defaults have knobs. A knob is a **param**: JSON, validated against the schema `behavior.list` reports for
+Six defaults have knobs. A knob is a **param**: JSON, validated against the schema `behavior.list` reports for
 the behavior (its `defaults` member lists them too), refused when it does not fit and never converted. With
 nothing set every param has the value the behavior had before params existed, and the traffic on the wire is
 unchanged (the [golden wire test](../analyses/testing-strategy.md#golden-wire-test) holds that).
@@ -97,15 +98,27 @@ Set them where a behavior is selected: a scenario's [`useBehavior`](../concepts/
 |                          | `auto`                  | boolean                                                                                         | `true`         | OCPP 2.x only (#601): send `Uploading` and `Uploaded` after an accepted `GetLog` and answer `AcceptedCanceled` to a `GetLog` that replaces an upload. `false` is the station of before #601: acknowledge only, the control plane drives the notifications. 1.6 always uploads.                                                                                                                                                                   |
 | `default.reset`          | `delayMs`               | integer 0 to 3 600 000                                                                          | `0`            | Wait this long after the answer settled before the reset takes effect (transactions stopped, then the boot or reconnect). `0` adds no wait at all. A 2.x `OnIdle` reset that is `Scheduled` is not delayed: it already waits for the last transaction.                                                                                                                                                                                           |
 | `default.unlock`         | `outcome`               | `configured`, `Unlocked`, `UnlockFailed`, `NotSupported`                                        | `configured`   | The status to answer once the CALL got that far (unknown connector and ongoing transaction answers come first). `configured` answers the connector's own `unlockResponse`, which the `unlockOutcome` scenario node sets. 2.x has no `NotSupported` and answers `UnlockFailed`.                                                                                                                                                                   |
+| `default.transaction`    | `remoteStart`           | `start`, `acceptOnly`                                                                           | `start`        | `acceptOnly` (#1135): answer a `RemoteStartTransaction` (1.6) / `RequestStartTransaction` (2.x) as with `start` (a request that cannot start is still `Rejected`), then do nothing: no Authorize, no `StartTransaction` / `TransactionEvent`, no status change. [More below](#remote-start-that-never-starts).                                                                                                                                   |
 
-`default.diagnostics`, `default.availability`, `default.reservation` and `default.transaction` declare no params:
-what they do is the station's semantics (connector state, reservations, the transaction itself), not a knob. To
+`default.diagnostics`, `default.availability` and `default.reservation` declare no params, and
+`default.transaction` has only `remoteStart`: what they do is the station's semantics (connector state,
+reservations, the transaction itself), not a knob. To
 change them write a [behavior](../analyses/scenario-or-behavior.md), or switch one off for a run with `useBehavior`
 `mode: "disable"`.
 
 The `unlockOutcome` node stays and is sugar for the common case: it sets the connector's `unlockResponse`
 (persistently, for that connector) and `outcome: "configured"` reads it. A non-`configured` `outcome` is for the
 station or the run and wins over it.
+
+### Remote start that never starts
+
+`default.transaction` `remoteStart: "acceptOnly"` (#1135) is a station that accepts a remote start and never
+begins the transaction (the cable is never plugged in, the request is lost in the firmware), so a CSMS can test
+its remote start timeout. The request goes through the same checks as with `start` and gets the same answer; an
+accepted 2.x answer still names a transaction the cable already started (#697). Then nothing follows: no
+Authorize (whatever `AuthorizeRemoteTxRequests` / `AuthorizeRemoteStart` says), no `StartTransaction` /
+`TransactionEvent`, no `StatusNotification`, and no hand-over to a scenario `remoteStartTrigger` parked on the
+connector. Remote stop is not affected.
 
 ## OCPP 2.x firmware train
 

@@ -444,6 +444,55 @@ describe("useBehavior params (schema 1.6)", () => {
       run = undefined;
     }
   });
+
+  test("default.transaction remoteStart acceptOnly: Accepted, then nothing (#1135)", async () => {
+    const cases = [
+      {
+        version: "1.6",
+        action: "RemoteStartTransaction",
+        payload: { idTag: "TAG1", connectorId: 1 },
+        invalid: { idTag: "TAG1", connectorId: 9 },
+        followUps: ["Authorize", "StartTransaction", "StatusNotification"],
+      },
+      {
+        version: "2.0.1",
+        action: "RequestStartTransaction",
+        payload: {
+          remoteStartId: 1,
+          evseId: 1,
+          idToken: { idToken: "TAG1", type: "ISO14443" },
+        },
+        invalid: {
+          remoteStartId: 2,
+          evseId: 9,
+          idToken: { idToken: "TAG1", type: "ISO14443" },
+        },
+        followUps: ["Authorize", "TransactionEvent", "StatusNotification"],
+      },
+    ] as const;
+    for (const c of cases) {
+      run = await runBehavior({ version: c.version });
+      startScenario(
+        run,
+        definition([
+          use("default.transaction", { params: { remoteStart: "acceptOnly" } }),
+          wait(120),
+        ]),
+      );
+      await run.settle();
+      const invalid = await run.call(c.action, c.invalid);
+      expect((invalid.payload as { status: string }).status).toBe("Rejected");
+      const reply = await run.call(c.action, c.payload);
+      expect(reply.payload).toEqual({ status: "Accepted" });
+      await run.advanceInSteps(60_000);
+      for (const action of c.followUps) {
+        expect(run.callsOf(action)).toHaveLength(0);
+      }
+      expect(run.cp.getConnector(1)?.transaction ?? null).toBeNull();
+      await run.dispose();
+      run = undefined;
+    }
+  });
 });
 
 describe("useBehavior mode disable", () => {

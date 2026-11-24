@@ -24,7 +24,7 @@ related:
   - scenario-format.md
   - ../analyses/scenario-or-behavior.md
   - ../entities/default-behaviors.md
-updated: 2026-11-21
+updated: 2026-11-25
 ---
 
 # Who answers an inbound CALL
@@ -273,6 +273,8 @@ Parking belongs to the **default** behavior (`default.transaction`), so it follo
   default answers, parking included. That is what `remoteStartTrigger` is for.
 - Policy and override come first, as for any CALL: a policy that refuses `RemoteStartTransaction` leaves the
   waiting trigger waiting.
+- With the `default.transaction` param `remoteStart: "acceptOnly"` (#1135) the default answers and parks
+  nothing: the waiting trigger keeps waiting ([Default behaviors](../entities/default-behaviors.md#remote-start-that-never-starts)).
 
 The parking sets stay as they are because routing the same traffic through registry rules would change who
 answers and when the race warning fires, which is not wire-neutral (design rule 4). The tests are

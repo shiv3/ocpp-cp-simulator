@@ -330,6 +330,15 @@ describe("behavior.list", () => {
       "InvalidSignature",
       "InstallVerificationFailed",
     ]);
+    // #1135: the remote start knob of default.transaction.
+    const tx = (list.result.defaults as any[]).find(
+      (d) => d.id === "default.transaction",
+    );
+    expect(tx.params.defaults).toEqual({ remoteStart: "start" });
+    expect(tx.params.schema.properties.remoteStart.enum).toEqual([
+      "start",
+      "acceptOnly",
+    ]);
     // Behaviors without params list none.
     expect(
       (list.result.defaults as any[]).find(

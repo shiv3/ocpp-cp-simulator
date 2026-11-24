@@ -6,8 +6,11 @@ sources:
   - apps/cli/src/main.ts
   - apps/cli/src/cli/
   - apps/cli/src/bundledDist.ts
-  - apps/cli/src/exportK6/runtimeSources.ts
-  - scripts/generate-k6-runtime.ts
+  - apps/cli/src/exportK6/
+  - packages/k6-host/
+  - scripts/generate-k6-engine.ts
+  - scripts/verify/k6/smoke.ts
+  - "issue #1126"
   - apps/cli/src/types.ts
   - package.json (`bin`, `files`)
   - scripts/verify-cli-tarball.sh
@@ -40,7 +43,7 @@ related:
   - ../concepts/log-format.md
   - ../concepts/local-authorization.md
   - ../concepts/charger-engine.md
-updated: 2026-11-21
+updated: 2026-11-24
 ---
 
 # CLI (`ocpp-cp-sim`)
@@ -374,10 +377,11 @@ so a broken `cli-latest` is still noticed between such changes.
 
 Both are built by `prepack` (and explicitly by `cli-release.yml`), never
 committed. The bundle finds `dist/` one level up from itself
-(`resolveBundledDist` in `apps/cli/src/bundledDist.ts`), and `export-k6` writes its k6 runtime
-from an embedded copy (`apps/cli/src/exportK6/runtimeSources.ts`, generated from
-`runtime/` by `bun run gen:k6-runtime`; a stale copy fails
-`runtimeManifest.test.ts`). Nothing in the package depends on the source
+(`resolveBundledDist` in `apps/cli/src/bundledDist.ts`), and `export-k6` writes its k6 engine
+from an embedded copy (`apps/cli/src/exportK6/engine.generated.ts`, the
+`packages/k6-host` bundle, written by `bun run gen:k6-engine`; not committed,
+`build:cli`, `build:cli:bun`, the sidecar build and the CI compile smoke run it
+first, and a checkout builds the engine on the fly). Nothing in the package depends on the source
 layout, which is what let the sources move into `packages/` and `apps/`
 (#578) without the published CLI noticing. The same holds for the
 [Open OCPP Trace SDK](../concepts/trace-format.md#reference-implementation)
@@ -397,7 +401,7 @@ prefix (refusing one that ships `src/`, `packages/` or `apps/`, or a `workspace:
 `bun build --compile` over the installed bundle (every bare specifier it kept
 must resolve from the installed package), the daemon answering
 `GET /v1/healthz` with a charge point bootstrapped, `export-k6` writing its
-runtime, and, when `dist/` is present, the web console serving its shell. It
+engine, and, when `dist/` is present, the web console serving its shell. It
 runs on every pull request (`ci.yml`) as well as at release time, so
 packaging breaks on the PR that breaks it. `apps/cli/src/build/__tests__/cliBundle.bun.test.ts`
 pins the same shape without `npm pack`: it builds the bundle into a directory
@@ -419,7 +423,7 @@ The [Docker image](docker-image.md) does not run the published bundle: it
 builds `dist-cli/main.js` with `bun run build:cli:bun` (`bun build --target=bun`,
 a `bun` shebang) and runs that under Bun, and
 `cliBundle.bun.test.ts` pins that bundle. The desktop [sidecar](desktop-app.md)
-is `bun build --compile` of `apps/cli/src/main.ts`; the embedded k6 runtime
+is `bun build --compile` of `apps/cli/src/main.ts`; the embedded k6 engine
 serves both.
 
 All flags described below apply whether you run the installed `ocpp-cp-sim`
@@ -941,168 +945,106 @@ ocpp-cp-sim --http-port 8080 --allow-behavior-code --watch-behaviors --behavior 
 
 ### export-k6
 
-Export a scenario JSON as a runnable [k6](https://k6.io) load-test bundle:
+Export a scenario, behavior code or both as a runnable [k6](https://k6.io) load-test bundle (#1126):
 
 ```shell
 ocpp-cp-sim export-k6 --scenario charge.json -o loadtest/
+CSMS_URL=wss://csms.example.com/ocpp CHARGERS=200 DURATION=5m k6 run loadtest/script.js
 ```
 
-(`--behavior` instead of `--scenario` exports behavior code: [below](#behaviors-export-k6---behavior).)
+The export runs **the simulator's own engine**: `engine.js` is the real `ChargePoint`, `ScenarioExecutor` and
+charger engine of `packages/core`, bundled for k6's JavaScript engine (Sobek) by
+[`packages/k6-host`](../../packages/k6-host/). There is no second implementation of scenario semantics. Every node
+type, wait, behavior, configuration key and CSMS-initiated call works exactly as in the daemon, because it is the same
+code (the golden-wire suite pins it for both). Requires k6 >= v1.6.0 (the stable `k6/websockets` module). OCPP 1.6J
+only: `--ocpp-version` accepts `1.6` and refuses anything else, as it always did; the bundle leaves out the OCPP
+2.0.1 / 2.1 schemas, X.509 and the SOAP stack, which a 1.6J station over `ws://` / `wss://` never reaches.
 
-The bundle contains a `scenario.k6.ts` entry, a self-contained TypeScript
-OCPP runtime (`ocpp-runtime/`), the scenario, and a README with the full
-environment-variable reference (`PROFILE=spike|steady|soak`, `VUS`,
-`CP_IDS_FILE`, mTLS notes). Requires k6 >= v1.6.0 (the bundle uses the
-stable `k6/websockets` module, not the deprecated
-`k6/experimental/websockets`). Phase 1 supports OCPP 1.6J.
+| Flag                    | Meaning                                                                                                         |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `--scenario <file>`     | Scenario JSON from the simulator (schema-validated).                                                            |
+| `--behavior <file>`     | [Behavior code](#behavior-code---behavior-and-behavior-build); repeatable. Alone or together with `--scenario`. |
+| `-o`, `--out <dir>`     | Output directory (default `k6-loadtest`).                                                                       |
+| `--chargers-per-vu <n>` | Charge points one k6 VU drives (default 50); `CHARGERS_PER_VU` overrides it at run time.                        |
+| `--ocpp-version <v>`    | `1.6` only.                                                                                                     |
+| `--force`               | Overwrite a non-empty output directory.                                                                         |
 
-```shell
-CSMS_URL=wss://csms.example.com/ocpp k6 run loadtest/scenario.k6.ts
-```
+The output directory holds `engine.js` (the bundle, about 0.9 MB), `script.js` (k6 `options`, metrics, wiring),
+`scenario.json`, `behaviors/*.bundle.js` (when `--behavior` is given), `ids.example.json` and a README with the full
+environment-variable reference.
 
-#### What the exported runtime models
+#### Run-time environment
 
-The bundle is a **second implementation** of the scenario semantics, not the
-daemon compiled to another target, and it models a deliberately reduced
-subset: enough to put realistic OCPP traffic on a CSMS at volume, not enough
-to reproduce the simulator's meter physics. The line was drawn when the
-charging-curve model landed — [the k6 export ignores the curve and keeps its
-flat rate](../analyses/fleet-load-and-observability-roadmap.md#4a-charging-curve-ev-model)
-rather than porting the model into the runtime — and it is stated here so each
-difference is not discovered one at a time.
+| Variable                                                     | Default         | Meaning                                                                                                              |
+| ------------------------------------------------------------ | --------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `CSMS_URL`                                                   | required        | Base `ws://` / `wss://` URL; the charge point id is appended as a path segment                                       |
+| `CHARGERS`                                                   | `10`            | Charge points in the **whole** test (all k6 instances together)                                                      |
+| `CHARGERS_PER_VU`                                            | `50`            | Charge points per VU. 50 to 100 is the sweet spot: a VU costs 10-20 MB, 200 in one VU ran 20-25 % slower             |
+| `PROFILE`                                                    | `steady`        | `steady`: run the scenario again until `DURATION`; `once`: one run; `soak`: one run, stay connected until `DURATION` |
+| `DURATION`, `RAMP_DURATION`                                  | `5m`, `30s`     | Run length after the ramp; connect starts are spread evenly over the ramp                                            |
+| `CP_ID_PREFIX`, `CP_ID_PAD`, `CP_ID_OFFSET`                  | `CP-`, `5`, `0` | Ids are `<prefix><index + 1 + offset>`, zero-padded                                                                  |
+| `CP_IDS_FILE`                                                | none            | JSON array of `{ "cpId", "basicPassword"? }`, one entry per charger                                                  |
+| `BASIC_AUTH_PASSWORD`, `SEED`, `METER_VALUE_SAMPLE_INTERVAL` | none            | Shared Basic password (security profile 1); seed of the random streams (per charge point); sampling interval         |
 
-| Behaviour                                                             | In the exported runtime                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Auto-meter time curve, session-relative                               | **Yes**, and agreeing: the curve is shifted so its value **at session start** (`t = 0`, not its earliest point) lands on the register the run started from, so a second session never rewinds and a curve beginning above zero is not double-counted. The trajectory between the points agrees too — see the row below.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| Auto-meter curve shape between its points                             | **Yes**, since #329: both runtimes evaluate the same De Casteljau Bezier over all control points, from [one module](../../packages/k6-runtime/src/curve.ts) the bundle copies verbatim. The export used to interpolate piecewise-linearly, which agreed only on a two-point curve and from three points on ran ahead by up to ~15% of the curve's span at its midpoint. **A bundle regenerated after #329 can therefore send different MeterValues** than one generated before it, for a curve with three or more control points. A curve of three or more points **can** send different values, not always: the Bezier and the polyline coincide when the control points are evenly spaced on a straight line (a plain `(0,0) (10,10) (20,20)` ramp) or all carry the same value. Collinearity alone is not enough — `(0,0) (5,5) (20,20)` is collinear, unevenly spaced, and differs by 2.5 kWh at its widest. |
-| Energy register integral on the wire                                  | **Yes**: `meterStart`, `meterStop` and the register sample are rounded at the wire, and the unrounded value is carried between ticks.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `maxValue` / `maxTime` / target-SoC stop conditions                   | **Yes**, judged on the delivered value.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| Battery charging curve (`evSettings.chargingCurve`)                   | **No** — `chargingCurve` is not read; the rate is the scenario's own increment or time curve.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| Electrical model (`currentType`, `phases`, `voltageV`, `powerFactor`) | **No** — the runtime sends one measurand, `Energy.Active.Import.Register`. No current, voltage, power or power-factor samples, and so no per-phase samples.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `SetChargingProfile` limits                                           | **No** — the auto-responder Accepts the call and the profile is never applied, so nothing caps the meter.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| State of charge                                                       | **Arithmetic only** — SoC is computed inside the target-SoC stop condition. It is not tracked, sampled or persisted, so the SoC-ownership rules do not apply.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| Persistence / restart resume                                          | **No** — a k6 VU is a fresh charge point each run.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| EV-side disconnect (`connectorPlug` plug-out, #488)                   | **No** — a plug-out sends StatusNotification `Available`; `StopTransactionOnEVSideDisconnect` is not modelled, so only a `transaction` stop node ends the transaction.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+The old `PROFILE=spike` and `VUS` / `CP_ID_TEMPLATE` variables are gone: ramp with `RAMP_DURATION`, size with `CHARGERS`.
 
-A scenario that relies on anything in the "No" rows still exports and runs; it
-simply generates traffic at the scenario's configured rate rather than the
-simulated one. The rows marked "Yes" are the ones a change to scenario
-behaviour has to reach in both places (#301).
+#### One fleet over several k6 instances
 
-#### The subset, field by field
+A charger's id comes from k6's **test-wide** VU id (`exec.vu.idInTest`), which `--execution-segment` allocates
+consistently across instances, so the instances of one distributed test never share an id: run the same script with the
+same environment everywhere, set `CHARGERS` to the whole fleet and let k6 split the VUs
+([Distributed load tests with the k6 operator](../analyses/distributed-load-tests-k6-operator.md)). Verified with two
+local k6 instances on complementary segments by `scripts/verify/k6/smoke.ts`, which CI runs on every pull request:
+20 chargers, 20 distinct ids, none connected twice.
 
-The tables below are the machine-checked half of the same boundary:
-`apps/cli/src/exportK6/__tests__/documentedSubset.test.ts` reads them out of this
-page and compares them against `packages/core/schema/scenario.schema.json` and the runtime's
-own source, so a scenario node type or an `evSettings` field cannot be added to
-the domain — or quietly implemented in the export — without this page moving
-too. A missing or wrongly-marked row fails that test with a message naming the
-field and the two ways out: implement it in the runtime, or record here that
-the export does not (#329).
+#### Metrics
 
-"Honoured" means the exported runtime reads the field, or walks the node type,
-at all. It is not a claim that the behaviour matches the simulator's in every
-detail — the table above is where those differences live.
+Fed directly from the frames the socket writes and reads (`ChargePoint.onWireFrame`), not from log lines:
 
-| Scenario node type   | Honoured |
-| -------------------- | -------- |
-| `start`              | Yes      |
-| `end`                | Yes      |
-| `statusChange`       | Yes      |
-| `transaction`        | Yes      |
-| `meterValue`         | Yes      |
-| `delay`              | Yes      |
-| `notification`       | Yes      |
-| `connectorPlug`      | Yes      |
-| `remoteStartTrigger` | Yes      |
-| `remoteStopTrigger`  | Yes      |
-| `statusTrigger`      | Yes      |
-| `reserveNow`         | Yes      |
-| `cancelReservation`  | Yes      |
-| `reservationTrigger` | Yes      |
-| `statusNotification` | Yes      |
-| `unlockOutcome`      | Yes      |
-| `configSet`          | Yes      |
-| `dataTransfer`       | Yes      |
-| `csmsCallTrigger`    | Yes      |
-| `responseOverride`   | Yes      |
-| `inboundPolicy`      | No       |
-| `certQuirks`         | No       |
-| `connectionTrigger`  | No       |
-| `ocppCall`           | Yes      |
-| `callResponse`       | No       |
-| `useBehavior`        | No       |
-| `notify`             | No       |
-| `switch`             | No       |
-| `choice`             | No       |
-| `setState`           | No       |
-| `parallel`           | No       |
-| `join`               | No       |
+| Metric                                            | Kind                    | Tags / meaning                                                                                                                                                          |
+| ------------------------------------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ocpp_calls`, `ocpp_errors`, `ocpp_call_duration` | counter, counter, trend | by `action`: CALLs the station sent, CALLERRORs received, time to the answer                                                                                            |
+| `ocpp_csms_calls`                                 | counter                 | by `action`: CALLs the CSMS sent to a charge point                                                                                                                      |
+| `ocpp_boot_time`, `ocpp_boot_rejected`            | trend, counter          | BootNotification round trip; a boot the CSMS did not accept                                                                                                             |
+| `ocpp_scenario_cycles`, `ocpp_scenario_duration`  | counter, trend          | scenario runs finished, and their duration                                                                                                                              |
+| `ocpp_assertions`, `scenario_success`             | rate                    | scenario assertions (tag `assertion`) evaluated by core's own engine; runs that completed with every assertion passing (threshold `rate>0.99` when there is a scenario) |
 
-A scenario containing a node type marked "No" is refused by `export-k6` with
-the offending type named, rather than exported and silently skipped. The schema 1.5 additions
-([Scenario format](../concepts/scenario-format.md#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15))
-are refused with their own reason: `callResponse` and `useBehavior` (they need a station behavior
-engine the k6 runtime does not have), a `csmsCallTrigger` with `behavior: "replace"` (or an `onBusy`),
-and an `ocppCall` whose payload holds `{"$from": …}`. The schema 1.6 additions ([#654](https://github.com/shiv3/ocpp-cp-simulator/issues/654)) are refused too: the `notify`, `switch`, `choice` and `setState` nodes, and a `delay` with `until` or `jitterSeconds` (the k6 runtime waits for `delaySeconds` only). The schema 1.9 [`parallel` and `join`](../concepts/scenario-format.md#parallel-and-join-schema-19) nodes are refused (the k6 interpreter has no branch-scoped cancellation). A [timeout edge](../concepts/scenario-format.md#timeout-edges-schema-18) (schema 1.8, an edge with `kind: "timeout"`) is refused naming the edge and its source: the k6 runtime fails the iteration when a wait times out. A [loop edge](../concepts/scenario-format.md#loop-edges-schema-110) (schema 1.10, an edge with `kind: "loop"`) is refused naming the edge and its source: the k6 runtime has no loop bounds (`times`, `forSeconds`, `until`), so run such a scenario on the simulator. The k6 runtime always lets the station answer a
+#### Cost, and why it is accepted
 
-CALL, so none of them is ever exported as the observing node it resembles.
+The price of running the real engine is weight. Measured on k6 v2.4.0 (OCPP 1.6J, `ws://`, a charge-and-meter loop;
+[the numbers](../analyses/distributed-load-tests-k6-operator.md#sizing)): about **2 MB of memory per running charge
+point** and about **0.6 ms of CPU per OCPP message**, against 0.25-0.3 MB and 0.2-0.4 ms for the hand-written
+runtime this replaced; 1,000 chargers need about 2 GB and 0.7 cores. The project chose that over keeping two engines
+(#1126): scale comes from running k6 distributed, not from a thinner station. There is no light mode.
 
 #### Behaviors: `export-k6 --behavior`
 
 ```shell
 ocpp-cp-sim export-k6 --behavior examples/behaviors/flaky-firmware.ts -o loadtest/
-CSMS_URL=ws://localhost:9000 VUS=5 DURATION=30s RUN_FOR_MS=14000 k6 run loadtest/behavior.k6.ts
+CSMS_URL=ws://localhost:9000/ocpp CHARGERS=5 DURATION=30s k6 run loadtest/script.js
 ```
 
-`--behavior <file>` (repeatable; exclusive with `--scenario`) exports [behavior code](#behavior-code---behavior-and-behavior-build)
-instead of a scenario. The file is type-checked and bundled as by `behavior build`, the bundle is copied to
-`behaviors/`, and `behavior.k6.ts` imports it statically (nothing is loaded by name at run time). OCPP 1.6J only.
-The k6 side is `BehaviorHost` (`packages/k6-runtime/src/behaviorHost.ts`): `ctx` over the same charge point the
-scenario interpreter drives. `ctx.sleep` and `ctx.until` are timers of the host, never k6 `sleep()`, so one VU can
-drive several charge points (`CHARGERS_PER_VU`) and stopping rejects every pending wait.
+`--behavior <file>` (repeatable) exports [behavior code](#behavior-code---behavior-and-behavior-build). The file is
+type-checked and bundled as by `behavior build` (ES2017, `k6/*` external; the syntax k6 hangs on is refused), the
+bundle is copied to `behaviors/`, and `script.js` imports it statically (nothing is loaded by name at run time). Every
+charge point of the export loads every behavior through `ChargePoint.loadBehavior`, exactly as the daemon does, so
+all of `ctx` works, including `ctx.connector`, the physical verbs, `mode: "extend"` and `ctx.defaultBehavior`, and
+responses are schema-checked like anywhere else. The export checks at export time what `loadBehavior` checks at run
+time (`requires`, rules, `beforeSend`) on a throwaway OCPP 1.6J station and refuses a behavior that cannot load, with
+the file, the id and the reason named; two behaviors with one id are refused too. A bundle that imports `k6` modules
+cannot be inspected at export and is refused with that reason. With behaviors only, the charge points connect, boot
+and run the behaviors until `DURATION`. `SEED` seeds `ctx.random` with the same algorithm and key as the simulator.
 
-What an iteration does: each VU connects its charge points, starts every `main` and `onCall` rule, and stops when
-every `main` returned, at `RUN_FOR_MS`, or 2 s before the end of a `steady` / `soak` run (`DURATION`, or its default of 5 m / 1 h), whichever is first (a
-behavior with no `main` and no `RUN_FOR_MS` serves CALLs for 60 s). Stopping sets `ctx.stopping`, rejects the waits
-and closes the sockets before k6's `gracefulStop` starts counting; a `main` that waits on something the host does
-not own is abandoned after 1.5 s and the iteration is reported failed. `SEED` seeds `ctx.random` (same algorithm and
-key as the simulator).
+Measured results of the earlier, hand-written behavior host are in
+[Charger engine migration → Verification results](../analyses/charger-engine-migration.md#verification-results);
+that host is gone (#1126).
 
-Refused at export, with the file and the reason named:
+#### What the export does not do
 
-| Refused                                                                                                     | Why                                                                                                                    |
-| ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `requires` of `physical` or `ocpp2.x`                                                                       | The k6 host has no connector model, runs on real time, and speaks 1.6J only.                                           |
-| `mode: "extend"`, `ctx.defaultBehavior`                                                                     | The k6 auto-responder has no default behavior with follow-ups to extend.                                               |
-| `ctx.connector`, `ctx.plugIn`, `unplug`, `authorize`, `startCharging`, `stopCharging`, `setConnectorStatus` | No connector model. The check is syntactic (it also flags a property of that name); the members throw at run time too. |
-| `on.connectorStatus`, `on.transactionStarted`, `on.transactionStopped`                                      | They need a connector and transaction model the k6 host does not have; never silently ignored.                         |
-| A bundle that imports `k6` modules                                                                          | The export loads the bundle to read `requires` and the rules; it cannot do that.                                       |
-
-The k6 host does provide `on.connected`, `on.disconnected`, `on.callResult`, `on.callReceived` (same delivery
-rule as in the simulator: after the turn, FIFO, not awaited), `beforeSend` (the k6 client asks the host before it
-queues any CALL, the automatic Heartbeat included; a dropped CALL rejects its caller with `OcppCallNoAnswerError`
-and is never queued) and `ctx.accepted` / `ctx.rejected` (the export writes the 1.6 answers into `behavior.k6.ts`).
-Per-charger assignment and reload do not apply to k6 (one export, one set of behaviors).
-
-Responses are not checked against the OCPP schema (`skipValidation` has nothing to skip), and a CALL no rule claims
-is answered by the same auto-responder as in a scenario export. Environment variables are in the generated README.
-Measured results: [Charger engine migration → Verification results](../analyses/charger-engine-migration.md#verification-results).
-
-| `evSettings` field   | Honoured                                                               |
-| -------------------- | ---------------------------------------------------------------------- |
-| `batteryCapacityKwh` | Yes — denominator of the target-SoC stop condition                     |
-| `initialSoc`         | Yes — opening SoC of the target-SoC stop condition                     |
-| `targetSoc`          | Yes — the target-SoC stop condition's threshold                        |
-| `maxChargingPowerKw` | Yes — default rate when the meterValue node sets no `outputKw`         |
-| `modelName`          | No — cosmetic; nothing on the wire carries it                          |
-| `chargingCurve`      | No — the rate is the scenario's own increment or time curve            |
-| `currentType`        | No — one measurand only, `Energy.Active.Import.Register`               |
-| `phases`             | No — no per-phase samples                                              |
-| `voltageV`           | No — no voltage or current samples                                     |
-| `powerFactor`        | No — no reactive-power model                                           |
-| `vehicleBehavior`    | No — no vehicle model; the rate is the scenario's own increment (#835) |
-| `attribution`        | No — informational credit for imported data (#458)                     |
+- OCPP 2.0.1 / 2.1 (the bundle is the lean 1.6J build) and SOAP.
+- Per-charge-point client certificates: k6 configures `tlsAuth` per domain, not per VU.
+- The Socket.IO control plane, persistence and the run recorder: a k6 charge point is in-memory and starts fresh.
+- Real-time only: the engine runs on k6's timers (`SEED` makes the random draws repeatable, not the schedule).
 
 ## Events
 

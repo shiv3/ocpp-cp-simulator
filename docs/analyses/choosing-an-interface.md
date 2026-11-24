@@ -19,17 +19,17 @@ updated: 2026-10-02
 
 # Choosing an interface
 
-| You want to…                                               | Use                                                                             | Why                                                                                                |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| Poke a CSMS by hand with zero install                      | [Web console](../entities/web-console.md) on GitHub Pages (Local mode)          | Runs in the tab, persists to IndexedDB; OCPP-J 1.6J/2.0.1/2.1, SOAP send-only                      |
-| Same, but with the full daemon feature set on a laptop     | [Desktop app](../entities/desktop-app.md)                                       | Bundles the daemon as a sidecar → Remote mode UX, no Bun/Node needed                               |
-| Script one charge point from a shell or CI job             | [CLI](../entities/cli.md) REPL or `--json`                                      | stdin/stdout JSON Lines, exit codes, `--trace-output`                                              |
-| Host many charge points and drive them programmatically    | [Daemon](../entities/daemon.md) + [Control plane](../concepts/control-plane.md) | One Socket.IO connection per client, rooms/events, `--state-db`, scenarios injected at runtime     |
-| Ship it into a Kubernetes / compose / Testcontainers setup | [Docker image](../entities/docker-image.md)                                     | Daemon + web console on one port, `/data` volume, healthcheck, semver tags                         |
-| Let an LLM agent operate it as a tool                      | [MCP endpoint](../entities/mcp-endpoint.md) (on the daemon)                     | Curated tools + generic `call_method`; see [Driving from an AI agent](driving-from-an-ai-agent.md) |
-| Verify a CSMS against OCPP 1.6 certification flows         | Daemon / console + [`cert16-*` templates](../entities/scenario-templates.md)    | 47 CP-side test cases; [steve-verify](../sources/steve-verify-readme.md) shows the full automation |
-| Diagnose a captured session                                | [`analyze`](../entities/analyze.md)                                             | DebugKit reports from a trace file or a live daemon                                                |
-| Load-test a CSMS                                           | [`export-k6`](../entities/cli.md#export-k6)                                     | Scenario → k6 bundle (OCPP 1.6J)                                                                   |
+| You want to…                                               | Use                                                                             | Why                                                                                                            |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Poke a CSMS by hand with zero install                      | [Web console](../entities/web-console.md) on GitHub Pages (Local mode)          | Runs in the tab, persists to IndexedDB; OCPP-J 1.6J/2.0.1/2.1, SOAP send-only                                  |
+| Same, but with the full daemon feature set on a laptop     | [Desktop app](../entities/desktop-app.md)                                       | Bundles the daemon as a sidecar → Remote mode UX, no Bun/Node needed                                           |
+| Script one charge point from a shell or CI job             | [CLI](../entities/cli.md) REPL or `--json`                                      | stdin/stdout JSON Lines, exit codes, `--trace-output`                                                          |
+| Host many charge points and drive them programmatically    | [Daemon](../entities/daemon.md) + [Control plane](../concepts/control-plane.md) | One Socket.IO connection per client, rooms/events, `--state-db`, scenarios injected at runtime                 |
+| Ship it into a Kubernetes / compose / Testcontainers setup | [Docker image](../entities/docker-image.md)                                     | Daemon + web console on one port, `/data` volume, healthcheck, semver tags                                     |
+| Let an LLM agent operate it as a tool                      | [MCP endpoint](../entities/mcp-endpoint.md) (on the daemon)                     | Curated tools + generic `call_method`; see [Driving from an AI agent](driving-from-an-ai-agent.md)             |
+| Verify a CSMS against OCPP 1.6 certification flows         | Daemon / console + [`cert16-*` templates](../entities/scenario-templates.md)    | 47 CP-side test cases; [steve-verify](../sources/steve-verify-readme.md) shows the full automation             |
+| Diagnose a captured session                                | [`analyze`](../entities/analyze.md)                                             | DebugKit reports from a trace file or a live daemon                                                            |
+| Load-test a CSMS                                           | [`export-k6`](../entities/cli.md#export-k6)                                     | Scenario → k6 bundle running the real engine (OCPP 1.6J); [distributed](distributed-load-tests-k6-operator.md) |
 
 ## Feature coverage by surface
 

@@ -18,9 +18,9 @@ sources:
   - packages/core/src/cp/shared/clock.ts
   - packages/core/src/cp/shared/rng.ts
   - packages/contracts/src/behavior.ts
-  - packages/k6-runtime/src/behaviorHost.ts
+  - packages/k6-host/src/charger.ts
   - apps/cli/src/behavior/BehaviorLibrary.ts
-  - apps/cli/src/exportK6/runExportK6Behavior.ts
+  - apps/cli/src/exportK6/buildBehaviors.ts
   - apps/web/src/console/pages/scenarios/edit/ScenarioEditorContent.tsx
   - "issues #566, #569, #575, #600, #618, #654"
 related:
@@ -32,7 +32,7 @@ related:
   - ../analyses/scenario-or-behavior.md
   - ../analyses/charger-engine-migration.md
   - ../analyses/testing-strategy.md
-updated: 2026-11-15
+updated: 2026-11-24
 ---
 
 # Charger engine
@@ -100,9 +100,9 @@ InboundCallGate / CallExchange  ◄──►  OCPP adapters (1.6 JSON, 2.x, SOAP
 One engine. The scenario executor is meant to become a client of the same `ctx` (a node is a `ctx` verb:
 see the mapping in [Scenario or behavior?](../analyses/scenario-or-behavior.md#node--ctx-parity)), so
 that JSON and code converge instead of drifting; until then they share the gate, the registry and the
-default behaviors, which is where they meet. The k6 runtime keeps its own host
-(`packages/k6-runtime/src/behaviorHost.ts`) over its client until a measurement shows a reason to unify it;
-`export-k6` refuses what that host cannot run, never degrades. The single-writer rule, the three write scopes,
+default behaviors, which is where they meet. The k6 export runs this engine too (#1126:
+`packages/k6-host` bundles `ChargePoint` and the engine for k6; the separate k6 behavior host is gone), so a
+behavior that loads on the simulator loads on k6. The single-writer rule, the three write scopes,
 the connector setters and the transaction `Proxy` are compatibility measures with a removal target, listed
 under [Transitional](#transitional).
 
@@ -234,7 +234,7 @@ export type CallOutcome =
   other string, are refused. (The former `virtual-time` was removed: no behavior needs to know the clock it
   runs on, and a station on real time must never refuse a behavior for it.) A behavior that uses a physical
   verb or `ctx.raw` without `physical` / `raw-frames` is **refused when its file loads**, by a syntactic scan
-  for `ctx.<member>`, `ctx["member"]` and `const { member } = ctx` (the same scan `export-k6` runs); a use the
+  for `ctx.<member>`, `ctx["member"]` and `const { member } = ctx` (`export-k6` loads the behavior on a throwaway station and gets the same verdict); a use the
   scan cannot see (an alias of `ctx`) fails at the call with the same message.
 
 `BehaviorContext`, one line per member and the error each can throw:
@@ -315,8 +315,7 @@ expected integer, got "2000" (strings are not converted)`). Nothing is coerced.
   `behaviorParams`) only sets its params. [Which ones have knobs](../entities/default-behaviors.md#params).
 - **Disable.** `useBehavior` `mode: "disable"` is a scenario rule per action that answers `ctx.accepted(action)`
   and does nothing after ([order](call-precedence.md#params-and-disable-in-the-order)).
-- **k6.** The k6 behavior host gives a behavior its declared `defaults` as `ctx.params`; a selector cannot set them
-  there, and `export-k6` refuses a `useBehavior` node.
+- **k6.** The k6 export runs this engine, so `useBehavior` params and modes work there as on the simulator.
 
 ### BehaviorRegistry
 
@@ -530,11 +529,10 @@ carries on. Delivery is in the table above.
   type-checks (ES2017 library only) and writes one ESM bundle.
 - Web: `LocalChargePointService.loadBehaviorBundle(id, blob | text)` loads a built bundle through
   `import(blobUrl)`, in the local runtime only (experimental, no UI).
-- k6: `export-k6 --behavior <file>` generates a static import. The k6 host implements `ctx` over the k6 client,
-  OCPP 1.6J only; `onCall` is `replace` only; it provides `connected`, `disconnected`, `callResult`,
-  `callReceived`, `beforeSend`, `accepted`, `rejected`. A behavior that needs anything else is refused at export
-  with the file and the reason named. Difference worth knowing: the k6 `callResult` for the boot may fire
-  before `connected`, where core fires `connected` when the socket opens.
+- k6: `export-k6 --behavior <file>` generates a static import; every charge point of the export loads the behavior
+  through `ChargePoint.loadBehavior`, the same call the daemon makes (since #1126 there is no separate k6 `ctx` host).
+  OCPP 1.6J only. The export loads the behavior once on a throwaway station and refuses what cannot load, with the file
+  and the reason named.
 
 **What is trusted.** The trust line is "who can make the daemon run code". The answer is: the operator of the
 command line and of the files it names, and nobody over the wire. No RPC method, MCP tool or OCPP message loads
@@ -558,7 +556,7 @@ execution has no isolation: `vm`, Worker and ShadowRealm are not called isolatio
 ### Determinism
 
 Virtual-time mode runs on Bun and browsers against an in-process fake CSMS or a trace replay: one queue, a fixed
-tie-break, seeded streams. Same seed, same effects. Real-time mode (k6, a real CSMS) promises only explanation
+tie-break, seeded streams. Same seed, same effects. Real-time mode (k6, which runs the same engine against a real CSMS) promises only explanation
 through seed and trace. The condition is that every wait goes through the clock and every random draw through a
 stream, and that nothing in the run waits on real I/O of its own process. The pinned-hash rule: **a pinned
 determinism hash changes only with a written cause**; the record of the one change so far, and what is known
@@ -584,7 +582,7 @@ Compatibility measures, kept so that callers and tests need not change, with an 
 ## Limits
 
 - Out of scope: QuickJS or any sandbox, remote delivery of code, an external-process plugin protocol, a console UI
-  for writing behaviors, and retiring `export-k6`'s separate implementation.
+  for writing behaviors. (`export-k6`'s separate implementation was retired by #1126.)
 - Two source checks (`check-direct-time`, `check-single-writer`) are syntactic and have accepted bypasses (an alias
   of a global, `eval`, a connector through a parameter or `this`).
 - Reload: a partial reload is retried in full (stations that already run the new version restart their `main`);

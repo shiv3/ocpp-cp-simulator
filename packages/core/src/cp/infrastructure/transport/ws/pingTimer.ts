@@ -1,4 +1,5 @@
 // Split out of OCPPWebSocket (#877): reaches the socket only through `host`.
+import { WS_READY_STATE } from "./readyState";
 import { LogType } from "../../../shared/Logger";
 import type { OcppWebSocketHost } from "./socketHost";
 
@@ -28,7 +29,8 @@ export class PingTimer {
     const seconds = this.host.pingIntervalSeconds;
     if (seconds <= 0 || !this.host.isConnected()) return;
     this.host.pingInterval = setInterval(() => {
-      if (!this.host.ws || this.host.ws.readyState !== WebSocket.OPEN) return;
+      if (!this.host.ws || this.host.ws.readyState !== WS_READY_STATE.OPEN)
+        return;
       try {
         this.host.ws.ping();
       } catch (error) {

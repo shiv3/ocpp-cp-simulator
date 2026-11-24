@@ -46,6 +46,9 @@ OUT_DIR="src-tauri/binaries"
 OUT="$OUT_DIR/ocpp-cp-sim-${TARGET}${EXT}"
 mkdir -p "$OUT_DIR"
 
+# The k6 engine export-k6 embeds (apps/cli/src/exportK6/engine.generated.ts).
+bun run gen:k6-engine
+
 echo "Building Bun sidecar for $TARGET ($BUN_TARGET) → $OUT"
 META="$(mktemp "${TMPDIR:-/tmp}/sidecar-meta.XXXXXX")"
 trap 'rm -f "$META"' EXIT

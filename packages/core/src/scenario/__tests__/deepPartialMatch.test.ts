@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { deepPartialMatch } from "../deepPartialMatch";
-import { deepPartialMatch as k6DeepPartialMatch } from "@ocpp-cp-simulator/k6-runtime/assertions";
 
-/** Shared vectors run against BOTH implementations: the k6 runtime cannot
- *  import repo modules (purity gate), so its copy stays — this table is
- *  what keeps the two from drifting. */
+/** Vectors that pin the semantics of the assertion payload match. */
 const VECTORS: Array<{
   name: string;
   subset: unknown;
@@ -63,15 +60,10 @@ const VECTORS: Array<{
   },
 ];
 
-describe("deepPartialMatch (canonical + k6 runtime copy)", () => {
-  for (const impl of [
-    { label: "packages/core/src/scenario", fn: deepPartialMatch },
-    { label: "exportK6 runtime", fn: k6DeepPartialMatch },
-  ]) {
-    for (const v of VECTORS) {
-      it(`${impl.label}: ${v.name}`, () => {
-        expect(impl.fn(v.subset, v.actual)).toBe(v.expected);
-      });
-    }
+describe("deepPartialMatch", () => {
+  for (const v of VECTORS) {
+    it(v.name, () => {
+      expect(deepPartialMatch(v.subset, v.actual)).toBe(v.expected);
+    });
   }
 });

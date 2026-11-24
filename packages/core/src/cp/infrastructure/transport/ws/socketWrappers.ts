@@ -3,6 +3,7 @@
  * wrapper around the native client, deferred Node `ws` client) and the Node
  * `ws` shapes they use. Moved verbatim from `wsUrlWithBasic.ts` (#877).
  */
+import { WS_READY_STATE } from "./readyState";
 import type { WsClientOptions } from "../../../shared/WsClientOptions";
 import type { OcppTlsOptions } from "../../../domain/transport/ConnectionSecurity";
 import { peerChainRootPem, type PeerCertificateLike } from "./peerCertificate";
@@ -180,7 +181,7 @@ export class DeferredNodeWebSocket {
   onmessage: ((event: MessageEvent) => void) | null = null;
   onclose: ((event: CloseEvent) => void) | null = null;
   private socket: NodeWsLike | null = null;
-  private state: number = WebSocket.CONNECTING;
+  private state: number = WS_READY_STATE.CONNECTING;
   private pendingClose: { code?: number; reason?: string } | null = null;
   private errorHandler: ((event: Event) => void) | null = null;
   private pendingErrors: Event[] = [];
@@ -245,7 +246,7 @@ export class DeferredNodeWebSocket {
       return;
     }
     this.pendingClose = { code, reason };
-    this.state = WebSocket.CLOSING;
+    this.state = WS_READY_STATE.CLOSING;
   }
 
   private async connect(
@@ -290,7 +291,7 @@ export class DeferredNodeWebSocket {
         // Once a refusal has been reported and terminated, ws's follow-up
         // error is about our own teardown, not about the CSMS.
         if (this.refusalHandled) return;
-        this.state = WebSocket.CLOSING;
+        this.state = WS_READY_STATE.CLOSING;
         // `ws` closes with 1006 and no reason. A failure of the connect or
         // the DNS lookup gets the reason Bun's client gives it, so everything
         // downstream sees one shape (see `neverReachedCsms`).
@@ -335,7 +336,7 @@ export class DeferredNodeWebSocket {
           this.refusalHandled = true;
           void request;
           socket.terminate();
-          this.state = WebSocket.CLOSED;
+          this.state = WS_READY_STATE.CLOSED;
           // 1002 to match what Bun 1.4.3 reports for the same refusal; the
           // `httpStatus` above is what classifies it (closeClassification).
           this.dispatchCloseOnce({
@@ -351,7 +352,7 @@ export class DeferredNodeWebSocket {
         socket.close(this.pendingClose.code, this.pendingClose.reason);
       }
       socket.on("open", () => {
-        this.state = WebSocket.OPEN;
+        this.state = WS_READY_STATE.OPEN;
         try {
           this.rootPem = peerChainRootPem(
             socket._socket?.getPeerCertificate?.(true),
@@ -365,7 +366,7 @@ export class DeferredNodeWebSocket {
         this.onmessage?.({ type: "message", data } as MessageEvent);
       });
       socket.on("close", (code, reason) => {
-        this.state = WebSocket.CLOSED;
+        this.state = WS_READY_STATE.CLOSED;
         const reasonText =
           typeof reason === "string"
             ? reason
@@ -380,7 +381,7 @@ export class DeferredNodeWebSocket {
         } as CloseEvent);
       });
     } catch (error) {
-      this.state = WebSocket.CLOSED;
+      this.state = WS_READY_STATE.CLOSED;
       const err =
         error instanceof Error ? error : new Error(String(error ?? "error"));
       this.dispatchError({

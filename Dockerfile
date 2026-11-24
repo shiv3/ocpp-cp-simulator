@@ -64,7 +64,7 @@ COPY packages/ocpp/package.json ./packages/ocpp/package.json
 COPY packages/ocpp-rpc/package.json ./packages/ocpp-rpc/package.json
 COPY packages/contracts/package.json ./packages/contracts/package.json
 COPY packages/trace/package.json ./packages/trace/package.json
-COPY packages/k6-runtime/package.json ./packages/k6-runtime/package.json
+COPY packages/k6-host/package.json ./packages/k6-host/package.json
 COPY packages/vehicle/package.json ./packages/vehicle/package.json
 COPY packages/core/package.json ./packages/core/package.json
 COPY packages/client/package.json ./packages/client/package.json
@@ -117,6 +117,8 @@ COPY scripts/tsconfig.json ./scripts/tsconfig.json
 COPY scripts/licenseNotices.ts ./scripts/licenseNotices.ts
 # `bun run build:cli:bun` writes the CLI bundle's notices with this (#870).
 COPY scripts/generate-cli-notices.ts ./scripts/generate-cli-notices.ts
+# ... and the k6 engine `export-k6` embeds (#1126).
+COPY scripts/generate-k6-engine.ts ./scripts/generate-k6-engine.ts
 COPY tailwind.config.js postcss.config.js ./
 COPY public ./public
 COPY packages ./packages

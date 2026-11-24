@@ -1,3 +1,4 @@
+import { WS_READY_STATE } from "./ws/readyState";
 import type { Logger } from "../../shared/Logger";
 import { LogType } from "../../shared/Logger";
 import { isCertificateInBundle } from "../../domain/security/certificateHash";
@@ -258,20 +259,24 @@ export class OCPPWebSocket implements ChargePointSocket {
       (generation) =>
         !this._disposed &&
         this._generationCounter === generation &&
-        this._ws?.readyState !== WebSocket.OPEN,
+        this._ws?.readyState !== WS_READY_STATE.OPEN,
     );
 
     // Initialize network simulation controller and current generation
     this._currentGeneration = new GenerationTokenImpl(this._generationCounter);
     const controllerHost: ControllerHost = {
-      writeUpstream: (raw: string) =>
-        writeUpstreamPhysical(this._ws, raw, this._logger),
-      dispatchDownstream: (raw: string) =>
+      writeUpstream: (raw: string) => {
+        writeUpstreamPhysical(this._ws, raw, this._logger);
+        this.observers.emit("frameSent", { raw });
+      },
+      dispatchDownstream: (raw: string) => {
+        this.observers.emit("frameReceived", { raw });
         dispatchIncomingFrame(raw, {
           logger: this._logger,
           intercept: (frame) => this._incomingInterceptor?.(frame) ?? false,
           handler: () => this._messageHandler,
-        }),
+        });
+      },
       requestSimulatedDisconnect: (reconnectDelayMs, ruleId, ruleType) =>
         this.simulateConnectionLoss(reconnectDelayMs, ruleId, ruleType),
       log: (message: string) => this._logger.info(message, LogType.NETWORK_SIM),
@@ -639,7 +644,7 @@ export class OCPPWebSocket implements ChargePointSocket {
 
   /** True when the underlying socket is open and ready to transmit. */
   public isConnected(): boolean {
-    return this._ws !== null && this._ws.readyState === WebSocket.OPEN;
+    return this._ws !== null && this._ws.readyState === WS_READY_STATE.OPEN;
   }
 
   /** True when a WebSocket object exists in OPEN or CONNECTING state.
@@ -648,8 +653,8 @@ export class OCPPWebSocket implements ChargePointSocket {
   public isOpenOrConnecting(): boolean {
     return (
       this._ws !== null &&
-      (this._ws.readyState === WebSocket.OPEN ||
-        this._ws.readyState === WebSocket.CONNECTING)
+      (this._ws.readyState === WS_READY_STATE.OPEN ||
+        this._ws.readyState === WS_READY_STATE.CONNECTING)
     );
   }
 

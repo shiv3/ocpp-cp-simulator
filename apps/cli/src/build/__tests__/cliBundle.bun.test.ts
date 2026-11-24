@@ -25,8 +25,9 @@ import { LOOPBACK, tcpPort } from "@ocpp-cp-simulator/core/test/bunServe";
 // Two things used to break under that shape and are pinned here:
 // - `resolveBundledDist()` looked for dist/ two levels up from the module
 //   (<repo>/src/cli → <repo>/dist); the bundle sits one level down.
-// - `export-k6` copied its k6 runtime from packages/k6-runtime/src/ beside
-//   the module, which the bundle does not carry; it is embedded now.
+// - `export-k6` copied its k6 runtime from files beside the module, which the
+//   bundle does not carry; the k6 engine bundle is embedded now
+//   (`bun run gen:k6-engine` writes it before the CLI is bundled).
 //
 // The bundle is built into a directory outside the checkout and run from a
 // cwd outside it too, so a lookup that silently falls back to the repository
@@ -47,6 +48,15 @@ beforeAll(() => {
   cwd = join(root, "elsewhere");
   mkdirSync(dirname(bundle), { recursive: true });
   mkdirSync(cwd, { recursive: true });
+  // The k6 engine the bundle embeds (`build:cli:bun` runs this first).
+  const gen = Bun.spawnSync([process.execPath, "run", "gen:k6-engine"], {
+    cwd: repoRoot,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (gen.exitCode !== 0) {
+    throw new Error(`gen:k6-engine failed:\n${gen.stderr.toString()}`);
+  }
   // The same command as `bun run build:cli:bun`, with the output redirected.
   const build = Bun.spawnSync(
     [
@@ -106,27 +116,22 @@ describe("the CLI bundle runs away from the source tree (#578)", () => {
     expect(exitCode).toBe(0);
   });
 
-  it("export-k6 writes the embedded runtime", () => {
+  it("export-k6 writes the embedded k6 engine", () => {
     const scenario = join(
       repoRoot,
-      "docs/examples/scenarios/demo-charging.json",
+      "scripts/verify/k6/quick-charging-cycle.json",
     );
     const out = join(root, "k6");
     const result = run(["export-k6", "--scenario", scenario, "--out", out]);
     expect(result.out).not.toContain("ENOENT");
     expect(result.exitCode).toBe(0);
-    for (const file of [
-      "scenario.k6.ts",
-      "ocpp-runtime/index.ts",
-      "ocpp-runtime/curve.ts",
-      "ocpp-runtime/wire/v16.ts",
-    ]) {
+    for (const file of ["script.js", "engine.js", "scenario.json"]) {
       expect(existsSync(join(out, file)), file).toBe(true);
     }
-    // The embedded copy is the repository's runtime, byte for byte.
-    expect(readFileSync(join(out, "ocpp-runtime/curve.ts"), "utf8")).toBe(
-      readFileSync(join(repoRoot, "packages/k6-runtime/src/curve.ts"), "utf8"),
-    );
+    // The embedded engine is the one packages/k6-host builds from the sources.
+    const engine = readFileSync(join(out, "engine.js"), "utf8");
+    expect(engine.length).toBeGreaterThan(500_000);
+    expect(engine).toContain("k6/websockets");
   });
 
   it(

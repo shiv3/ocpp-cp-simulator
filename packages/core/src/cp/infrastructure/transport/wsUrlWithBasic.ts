@@ -192,7 +192,7 @@ export function buildOcppBasicAuthorization(
 // Bun/Node `ws` accept `{ protocols, headers }` as the 2nd arg, but the DOM
 // lib's WebSocket constructor does not. The whole module compiles under both
 // tsconfigs (CLI=bun-types, app=DOM), so cast through a local type.
-type WebSocketWithHeaders = new (
+export type WebSocketWithHeaders = new (
   url: string,
   options: {
     protocols?: string | string[];
@@ -211,6 +211,20 @@ export interface OcppWebSocketConnectOptions {
   /** #611: the client options the runtime must honour at the handshake. */
   readonly ws?: WsClientOptions;
   readonly useNodeWsFallback: boolean;
+}
+
+/**
+ * The WebSocket constructor `openOcppWebSocket` uses instead of the global one
+ * (a host with its own client, e.g. k6's `k6/websockets`, installs it once
+ * before building charge points). It is called like Bun's client:
+ * `new Ctor(url, { protocols, headers, ... })`.
+ */
+let webSocketConstructor: WebSocketWithHeaders | null = null;
+
+export function setOcppWebSocketConstructor(
+  ctor: WebSocketWithHeaders | null,
+): void {
+  webSocketConstructor = ctor;
 }
 
 export function isBunRuntime(): boolean {
@@ -388,7 +402,10 @@ export function buildOcppWebSocketConnectOptions(params: {
     tls,
     ...(params.ws ? { ws: params.ws } : {}),
     useNodeWsFallback:
-      isNodeRuntime() && !isBunRuntime() && !isBrowserRuntime(),
+      webSocketConstructor === null &&
+      isNodeRuntime() &&
+      !isBunRuntime() &&
+      !isBrowserRuntime(),
   };
 }
 
@@ -571,9 +588,14 @@ export function openOcppWebSocket(params: {
     ) as unknown as OcppSocket;
   }
   const bunOptions = bunOnlyOptions(connectOptions.ws);
-  if (!isBrowserRuntime() && (hasHeaders || connectOptions.tls || bunOptions)) {
+  if (
+    webSocketConstructor !== null ||
+    (!isBrowserRuntime() && (hasHeaders || connectOptions.tls || bunOptions))
+  ) {
     return new BufferedErrorWebSocket(
-      new (WebSocket as unknown as WebSocketWithHeaders)(connectOptions.url, {
+      new (
+        webSocketConstructor ?? (WebSocket as unknown as WebSocketWithHeaders)
+      )(connectOptions.url, {
         protocols: [...connectOptions.protocols],
         ...(hasHeaders ? { headers: connectOptions.headers } : {}),
         ...(connectOptions.tls ? { tls: connectOptions.tls } : {}),

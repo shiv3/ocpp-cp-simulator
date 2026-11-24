@@ -108,7 +108,7 @@
         "@ocpp-cp-simulator/client": "workspace:*",
         "@ocpp-cp-simulator/contracts": "workspace:*",
         "@ocpp-cp-simulator/core": "workspace:*",
-        "@ocpp-cp-simulator/k6-runtime": "workspace:*",
+        "@ocpp-cp-simulator/k6-host": "workspace:*",
         "@ocpp-cp-simulator/ocpp": "workspace:*",
         "@ocpp-cp-simulator/trace": "workspace:*",
       },
@@ -140,15 +140,18 @@
       "version": "0.0.0",
       "dependencies": {
         "@ocpp-cp-simulator/contracts": "workspace:*",
-        "@ocpp-cp-simulator/k6-runtime": "workspace:*",
         "@ocpp-cp-simulator/ocpp": "workspace:*",
         "@ocpp-cp-simulator/ocpp-rpc": "workspace:*",
         "@ocpp-cp-simulator/vehicle": "workspace:*",
       },
     },
-    "packages/k6-runtime": {
-      "name": "@ocpp-cp-simulator/k6-runtime",
+    "packages/k6-host": {
+      "name": "@ocpp-cp-simulator/k6-host",
       "version": "0.0.0",
+      "dependencies": {
+        "@ocpp-cp-simulator/contracts": "workspace:*",
+        "@ocpp-cp-simulator/core": "workspace:*",
+      },
     },
     "packages/ocpp": {
       "name": "@ocpp-cp-simulator/ocpp",
@@ -299,7 +302,7 @@
 
     "@ocpp-cp-simulator/core": ["@ocpp-cp-simulator/core@workspace:packages/core"],
 
-    "@ocpp-cp-simulator/k6-runtime": ["@ocpp-cp-simulator/k6-runtime@workspace:packages/k6-runtime"],
+    "@ocpp-cp-simulator/k6-host": ["@ocpp-cp-simulator/k6-host@workspace:packages/k6-host"],
 
     "@ocpp-cp-simulator/ocpp": ["@ocpp-cp-simulator/ocpp@workspace:packages/ocpp"],
 

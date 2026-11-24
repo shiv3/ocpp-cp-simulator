@@ -1,0 +1,148 @@
+{
+  "id": "quick-charging-cycle",
+  "name": "Quick charging cycle (load-test smoke)",
+  "description": "Complete charging cycle with AutoMeterValue",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": {
+    "type": "manual"
+  },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": {
+        "x": 400,
+        "y": 50
+      },
+      "data": {
+        "label": "Start"
+      }
+    },
+    {
+      "id": "transaction-start",
+      "type": "transaction",
+      "position": {
+        "x": 400,
+        "y": 350
+      },
+      "data": {
+        "label": "Start Transaction",
+        "action": "start",
+        "tagId": "USER001",
+        "batteryCapacityKwh": 60,
+        "initialSoc": 20
+      }
+    },
+    {
+      "id": "meter-auto",
+      "type": "meterValue",
+      "position": {
+        "x": 400,
+        "y": 550
+      },
+      "data": {
+        "label": "Auto MeterValue",
+        "value": 0,
+        "sendMessage": true,
+        "autoIncrement": true,
+        "incrementInterval": 2,
+        "incrementAmount": 300,
+        "maxValue": 25000,
+        "maxTime": 6
+      }
+    },
+    {
+      "id": "delay-charging",
+      "type": "delay",
+      "position": {
+        "x": 400,
+        "y": 650
+      },
+      "data": {
+        "label": "Charging Complete",
+        "delaySeconds": 2
+      }
+    },
+    {
+      "id": "transaction-stop",
+      "type": "transaction",
+      "position": {
+        "x": 400,
+        "y": 750
+      },
+      "data": {
+        "label": "Stop Transaction",
+        "action": "stop"
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": {
+        "x": 400,
+        "y": 1050
+      },
+      "data": {
+        "label": "End"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-start-transaction",
+      "source": "start-1",
+      "target": "transaction-start"
+    },
+    {
+      "id": "e-txstart-meter",
+      "source": "transaction-start",
+      "target": "meter-auto"
+    },
+    {
+      "id": "e-meter-delay",
+      "source": "meter-auto",
+      "target": "delay-charging"
+    },
+    {
+      "id": "e-delay-txstop",
+      "source": "delay-charging",
+      "target": "transaction-stop"
+    },
+    {
+      "id": "e-txstop-end",
+      "source": "transaction-stop",
+      "target": "end-1"
+    }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [],
+    "note": "No CSMS action; the tag USER001 must be authorized (the default answer). Its Auto MeterValue node is configured to meter up to 25 kWh or 300 s (500 Wh per 5 s) before the transaction stops; maxDurationSeconds 330 is the safety bound. Use --time-scale to run it faster."
+  },
+  "assertions": [
+    {
+      "id": "started",
+      "type": "payload_match",
+      "action": "StartTransaction",
+      "payload": {
+        "idTag": "USER001"
+      },
+      "description": "StartTransaction carries idTag USER001"
+    },
+    {
+      "id": "stop-after-start",
+      "type": "message_after",
+      "before": {
+        "action": "StartTransaction"
+      },
+      "after": {
+        "action": "StopTransaction"
+      },
+      "description": "StopTransaction after StartTransaction"
+    }
+  ],
+  "maxDurationSeconds": 330
+}

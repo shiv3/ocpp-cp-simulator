@@ -1,4 +1,5 @@
 // Split out of OCPPWebSocket (#877): reaches the socket only through `host`.
+import { WS_READY_STATE } from "./readyState";
 import { LogType } from "../../../shared/Logger";
 import {
   OcppSecurityProfileConfigError,
@@ -204,7 +205,7 @@ export class ConnectionOpener {
       this.host.handshakeTimer = null;
       if (
         this.host.ws !== socket ||
-        socket.readyState !== WebSocket.CONNECTING
+        socket.readyState !== WS_READY_STATE.CONNECTING
       ) {
         return;
       }

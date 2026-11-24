@@ -4,6 +4,9 @@ type: analysis
 summary: Design for #978 — where the OCPP-J/SOAP protocol code lives today and what ties it to the simulator, the target modules (model, rpc, transports, toolkit), the seams to cut, what the new domain-free packages/ocpp-rpc proves and does not, decisions on the RFC's open questions, and the phase → issue plan.
 sources:
   - "issue #978"
+  - "issue #1126"
+  - packages/core/src/cp/infrastructure/transport/wsUrlWithBasic.ts
+  - packages/core/src/cp/infrastructure/charge-point/createHeadlessServices.ts
   - packages/ocpp-rpc/src/index.ts
   - packages/ocpp-rpc/src/RpcEndpoint.ts
   - packages/ocpp-rpc/src/frames.ts
@@ -21,7 +24,7 @@ related:
   - ../concepts/network-simulation.md
   - ../concepts/trace-format.md
   - ../concepts/charger-engine.md
-updated: 2026-11-21
+updated: 2026-11-24
 ---
 
 # Reusable OCPP protocol stack
@@ -45,7 +48,7 @@ All paths below are under `packages/core/src/cp/` unless stated otherwise.
 | Concern                  | Where it lives                                                                                                                                                                                                                                                                                       | Simulator coupling                                                                                                                                                                                                                                                                                                        |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Model                    | `packages/ocpp` (generated types, validators, vendored OCA schemas)                                                                                                                                                                                                                                  | None, but not publishable: private at `0.0.0`, exports `"./*": "./src/*.ts"`, extensionless relative imports, JSON imported without import attributes, `ajv` / `ajv-draft-04` declared only in the root manifest                                                                                                          |
-| OCPP-J frame codec       | `packages/ocpp-rpc` now; still re-implemented in `infrastructure/transport/ws/wsNetworkSim.ts` (`dispatchIncomingFrame`), `transport/network-sim/FrameContext.ts`, `RawFrameSender.ts` (`messageIdOf`), `packages/k6-runtime/src/frames.ts` and the mock CSMS helpers                                | `k6-runtime/src/frames.ts` is copied verbatim into a k6 export and must stay import-free                                                                                                                                                                                                                                  |
+| OCPP-J frame codec       | `packages/ocpp-rpc` now; still re-implemented in `infrastructure/transport/ws/wsNetworkSim.ts` (`dispatchIncomingFrame`), `transport/network-sim/FrameContext.ts`, `RawFrameSender.ts` (`messageIdOf`) and the mock CSMS helpers                                                                     | The k6 export no longer carries a copy: since #1126 it runs core's own codec (`packages/k6-host`)                                                                                                                                                                                                                         |
 | Correlation and timeouts | `CallWaiters` (now a `realClock` subclass of ocpp-rpc's) covers only DataTransfer and expert calls (`ExpertCalls.ts`, `RawFrameSender.ts`); the real correlation is `transport/v16/serialCallQueueV16.ts` + `RequestHistory` (`v16/outboundRequestsV16.ts`) and `transport/v201/callPipelineV201.ts` | Both `SerialCallQueueV16` and `CallPipelineV201` hold a `ChargePoint`                                                                                                                                                                                                                                                     |
 | WebSocket transport      | `infrastructure/transport/OCPPWebSocket.ts` and `ws/` (opener, close handling, ping, `reconnectScheduler.ts`), `profile/subprotocols.ts`                                                                                                                                                             | `OCPPWebSocket` builds a `NetworkSimController` in its constructor; `domain/transport/ChargePointSocket.ts` mixes transport and fault control; `ws/reconnectScheduler.ts` arms raw `setTimeout` / `Date.now()`; the negotiated subprotocol is exposed by `ws/socketWrappers.ts` but never compared with the one requested |
 | Fault vocabulary         | `CloseCause` and the `GenerationToken` interface in `domain/transport/networkSim.ts`, `Settlement` in `transport/network-sim/NetworkSimPipeline.ts`, `GenerationTokenImpl` in `ws/closeClassification.ts`                                                                                            | The WebSocket close path (`ws/closeHandler.ts`, `ws/connectionOpener.ts`) imports them through the `network-sim` barrel                                                                                                                                                                                                   |
@@ -108,6 +111,28 @@ behaviour:
 5. **A `HandlerContext` without `ChargePoint`.** Handlers get the payload, the message
    id and the services they need; the simulator adapts its `ChargePoint` to that
    context (#1059).
+
+### Host seams added for non-Bun hosts (#1126)
+
+The k6 load-test export ([`export-k6`](../entities/cli.md#export-k6)) runs the real
+`ChargePoint` inside k6's JavaScript engine, which has no global `WebSocket`
+with Bun's `{ protocols, headers }` constructor, no `ws` module and no `process`.
+Five small, behaviour-preserving seams let such a host plug in without patching
+globals; the golden-wire suite is unchanged. Each one lands next to the
+extraction issue it prepares:
+
+| Seam                                                                                                                            | What it does                                                                                                                                                                                                                       | Maps to            |
+| ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `setOcppWebSocketConstructor(ctor \| null)` (`transport/wsUrlWithBasic.ts`) and `WS_READY_STATE` (`transport/ws/readyState.ts`) | `openOcppWebSocket` calls the installed constructor like Bun's client (`new Ctor(url, { protocols, headers })`) and skips the Node `ws` fallback; the transport reads `OPEN` / `CONNECTING` from the constant, not from the global | #1057              |
+| `ChargePoint.onWireFrame(listener)` / socket `observers` events `frameSent`, `frameReceived`                                    | Sent and received text frames, as the socket writes and reads them (after the network simulation); a host counts frames without enabling INFO logging and parsing `Sent:` lines                                                    | #1055              |
+| `setLoggerConsole(sink)` and `Logger.setMaxEntries(n)` (`shared/Logger.ts`)                                                     | The console line goes to the installed sink (k6 prints every console call); the entry list is unbounded by default, bounded or disabled (`0`) for a headless station                                                               | #1055 (log format) |
+| `createChargePoint(..., services)`                                                                                              | Replaces any of the default service factories (the `ChargePointDeps` seam of #575)                                                                                                                                                 | #575               |
+| `createHeadlessServices()` (`infrastructure/charge-point/`)                                                                     | Opt-in no-op operational timeline and state history for headless load profiles (about 7 % of a connected station's heap); never the default                                                                                        | -                  |
+
+Also in this change: the station context is shared by prototype
+(`ChargePointCollaborators.ts`, `inheritCtx`) instead of spread into each of the
+~15 collaborators, which saves about 0.07 MB per charge point in a many-station
+process. Nothing observable changes.
 
 ## `packages/ocpp-rpc`
 

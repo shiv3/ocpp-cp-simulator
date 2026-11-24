@@ -11,9 +11,6 @@
       "path": "../contracts"
     },
     {
-      "path": "../k6-runtime"
-    },
-    {
       "path": "../ocpp"
     },
     {

@@ -1,0 +1,90 @@
+// packages/k6-host/src/k6-modules.d.ts
+// Minimal ambient declarations of the k6 modules the host imports, so it
+// typechecks without @types/k6. k6 provides the real modules at run time.
+declare module "k6" {
+  export function check<T>(
+    val: T,
+    sets: Record<string, (val: T) => boolean>,
+  ): boolean;
+}
+
+declare module "k6/metrics" {
+  export class Trend {
+    constructor(name: string, isTime?: boolean);
+    add(value: number, tags?: Record<string, string>): void;
+  }
+  export class Counter {
+    constructor(name: string);
+    add(value: number, tags?: Record<string, string>): void;
+  }
+  export class Rate {
+    constructor(name: string);
+    add(value: boolean | number, tags?: Record<string, string>): void;
+  }
+}
+
+declare module "k6/timers" {
+  export function setTimeout(fn: () => void, delayMs: number): number;
+  export function clearTimeout(id: number): void;
+  export function setInterval(fn: () => void, delayMs: number): number;
+  export function clearInterval(id: number): void;
+}
+
+declare module "k6/data" {
+  export class SharedArray<T> {
+    constructor(name: string, fn: () => T[]);
+    readonly length: number;
+    [index: number]: T;
+  }
+}
+
+// Requires k6 >= 1.6.0 (k6/websockets graduated from
+// k6/experimental/websockets in grafana/k6#5579); k6/timers above has been
+// stable since k6 v0.51.
+declare module "k6/websockets" {
+  export interface WebSocketParams {
+    headers?: Record<string, string>;
+  }
+  export class WebSocket {
+    constructor(
+      url: string,
+      protocols?: string | string[] | null,
+      params?: WebSocketParams,
+    );
+    readonly readyState: number;
+    readonly bufferedAmount?: number;
+    readonly url: string;
+    readonly protocol?: string;
+    binaryType: string;
+    send(data: string): void;
+    ping?(): void;
+    close(code?: number, reason?: string): void;
+    addEventListener(
+      type: "open" | "message" | "close" | "error",
+      handler: (event: unknown) => void,
+    ): void;
+    removeEventListener?(
+      type: "open" | "message" | "close" | "error",
+      handler: (event: unknown) => void,
+    ): void;
+  }
+}
+
+declare module "k6/encoding" {
+  const encoding: {
+    b64encode(input: string | ArrayBuffer, variant?: string): string;
+    b64decode(input: string, variant?: string): ArrayBuffer;
+  };
+  export default encoding;
+}
+
+declare module "k6/execution" {
+  const exec: {
+    scenario: { startTime: number; name: string };
+    vu: { idInTest: number };
+  };
+  export default exec;
+}
+
+/** k6 init-context file reader (available in the generated entry + index.ts). */
+declare function open(path: string): string;

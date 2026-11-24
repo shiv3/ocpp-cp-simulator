@@ -1,19 +1,12 @@
 /**
- * The auto-meter time curve, as the simulator reads it.
- *
- * The evaluation itself lives in `packages/k6-runtime/src/curve.ts` and is
- * re-exported here: the exported k6 runtime is a second implementation of these
- * scenario semantics, and the two used to interpolate differently (Bezier here,
- * piecewise-linear there). One module, imported by both, is what stops that
- * recurring (#329). The module sits under the export runtime because an export
- * bundle is a verbatim copy of that directory and every file in it must be free
- * of repo imports; nothing else about the ownership changes.
+ * The auto-meter time curve, as the simulator reads it. The evaluation itself
+ * lives in `meterCurve.ts` and is re-exported here.
  */
 import {
   calculateBezierPoint,
   evaluateCurveKwh,
   type CurvePoint,
-} from "@ocpp-cp-simulator/k6-runtime/curve";
+} from "./meterCurve";
 
 export { calculateBezierPoint, evaluateCurveKwh };
 export type { CurvePoint };
@@ -113,8 +106,8 @@ export interface CurvePointNormalization {
  *
  * Offending ordinates are **clamped to the running maximum, not dropped**.
  * Clamping preserves the curve's time span, which `autoCalculateInterval`
- * divides into an interval and which the exported k6 runtime reads as the
- * auto-meter's stop condition; dropping points would silently shorten the
+ * divides into an interval and which the auto-meter reads as its stop
+ * condition; dropping points would silently shorten the
  * session as well as flatten it. The register then plateaus where the curve
  * descends — energy already delivered is never un-delivered — which is the
  * weakest correction that still honours the documented guarantee that a

@@ -73,7 +73,7 @@ describe("normalizeCurvePoints (#332)", () => {
 
   it("keeps the curve's time span rather than dropping the offending point", () => {
     // The span is what `autoCalculateInterval` divides into a tick interval
-    // and what the exported k6 runtime reads as the auto-meter's stop
+    // and what the auto-meter reads as its stop
     // condition, so a clamp has to leave it alone.
     const { points } = normalizeCurvePoints([
       { time: 0, value: 10 },

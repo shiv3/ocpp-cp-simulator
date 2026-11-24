@@ -49,9 +49,9 @@ export const PACKAGE_NAMES = [
   "ocpp-rpc",
   "contracts",
   "trace",
-  "k6-runtime",
   "vehicle",
   "core",
+  "k6-host",
   "client",
   "apps/cli",
   "apps/web",
@@ -76,8 +76,8 @@ export const PACKAGE_DIRS: Readonly<Record<PackageName, string>> = {
   contracts: "packages/contracts",
   trace: "packages/trace",
   vehicle: "packages/vehicle",
-  "k6-runtime": "packages/k6-runtime",
   core: "packages/core",
+  "k6-host": "packages/k6-host",
   client: "packages/client",
   "apps/cli": "apps/cli",
   "apps/web": "apps/web",
@@ -104,12 +104,13 @@ export function packageNameOf(pkg: PackageName): string {
  * - packages/trace: the trace format reader/writer.
  * - packages/vehicle: the vehicle behavior domain (#835): what the vehicle
  *   wants and when. Imports nothing, so it can leave the repository unchanged.
- * - packages/k6-runtime: dependency-free files copied verbatim into an
- *   export; runtimeManifest.test.ts enforces that they import nothing outside
- *   themselves.
  * - packages/core: the charge point engine, the scenario engine and what they
  *   need (scenario templates and their JSON, blueprints, the WebCrypto
  *   ambient types, the test helpers every package's tests share).
+ * - packages/k6-host: runs the real engine inside k6 (#1126): the host shims
+ *   (polyfills, the `k6/websockets` adapter), the fleet runner and the bundler
+ *   that builds `engine.js` for `export-k6`. Depends on core, never the other
+ *   way; not portable (the bundler needs Bun).
  * - packages/client: how a UI or tool talks to a daemon or to an in-process
  *   engine.
  * - apps/cli: the CLI, the daemon, the MCP endpoint, export-k6, analyze, and
@@ -121,9 +122,9 @@ export const PACKAGE_MAP: readonly MapEntry[] = [
   { match: "packages/ocpp-rpc/", pkg: "ocpp-rpc" },
   { match: "packages/contracts/", pkg: "contracts" },
   { match: "packages/trace/", pkg: "trace" },
-  { match: "packages/k6-runtime/", pkg: "k6-runtime" },
   { match: "packages/vehicle/", pkg: "vehicle" },
   { match: "packages/core/", pkg: "core" },
+  { match: "packages/k6-host/", pkg: "k6-host" },
   { match: "packages/client/", pkg: "client" },
   { match: "apps/cli/", pkg: "apps/cli" },
   { match: "apps/web/", pkg: "apps/web" },
@@ -137,12 +138,12 @@ export const ALLOWED_DEPENDENCIES: Readonly<
   "ocpp-rpc": ["ocpp"],
   contracts: [],
   trace: [],
-  "k6-runtime": [],
   vehicle: [],
-  core: ["ocpp", "ocpp-rpc", "contracts", "trace", "k6-runtime", "vehicle"],
+  core: ["ocpp", "ocpp-rpc", "contracts", "trace", "vehicle"],
+  "k6-host": ["contracts", "core"],
   client: ["core", "contracts", "ocpp", "trace"],
-  "apps/cli": ["ocpp", "contracts", "trace", "k6-runtime", "core", "client"],
-  "apps/web": ["ocpp", "contracts", "trace", "k6-runtime", "core", "client"],
+  "apps/cli": ["ocpp", "contracts", "trace", "core", "k6-host", "client"],
+  "apps/web": ["ocpp", "contracts", "trace", "core", "client"],
 };
 
 // ---------------------------------------------------------------------------
@@ -155,7 +156,6 @@ export const PORTABLE_PACKAGES: ReadonlySet<PackageName> = new Set([
   "ocpp-rpc",
   "contracts",
   "trace",
-  "k6-runtime",
   "vehicle",
   "core",
   "client",

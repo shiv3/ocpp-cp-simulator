@@ -311,11 +311,12 @@ Options:
                            connector's report and why.
   behavior build <file> [--out <file>]
                            Type-check a behavior and bundle it (ES2017, k6/* external).
-  export-k6 (--scenario <file.json> | --behavior <file>...) [-o <dir>] [--ocpp-version 1.6] [--force]
-                           Export a scenario, or behavior code (OCPP 1.6J),
-                           as a runnable k6 load-test bundle (entry script +
-                           self-contained OCPP runtime + README). Requires
-                           k6 >= v1.6 to run the generated test. See
+  export-k6 (--scenario <file.json> | --behavior <file>...) [-o <dir>] [--chargers-per-vu <n>] [--ocpp-version 1.6] [--force]
+                           Export a scenario and/or behavior code (OCPP 1.6J)
+                           as a runnable k6 load-test bundle: the simulator's
+                           own charge point engine for k6 (engine.js), a
+                           generated script.js, the scenario and a README.
+                           Requires k6 >= v1.6 to run the generated test. See
                            docs/entities/cli.md -> export-k6.
   --health-path <path>     Absolute path the health-check JSON is served on
                            (default: /v1/healthz). Change this when running

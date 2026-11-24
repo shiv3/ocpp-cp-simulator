@@ -5,7 +5,7 @@
 //
 //   bun apps/cli/src/main.ts export-k6 --behavior scripts/verify/behaviors/k6-hooks.ts -o /tmp/k6hooks
 //   bun scripts/verify/fakeCsms16.ts --port 9100 --log /tmp/frames.jsonl --update-firmware &
-//   CSMS_URL=ws://127.0.0.1:9100 VUS=1 DURATION=12s RUN_FOR_MS=6000 k6 run /tmp/k6hooks/behavior.k6.ts
+//   CSMS_URL=ws://127.0.0.1:9100 CHARGERS=1 DURATION=12s k6 run /tmp/k6hooks/script.js
 //
 // Expected on the CSMS: UpdateFirmware answered `{}`, then Downloading,
 // Installing and Installed with requestId 42, and no Downloaded (dropped).

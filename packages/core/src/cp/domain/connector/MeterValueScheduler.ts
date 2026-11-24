@@ -325,7 +325,7 @@ export class MeterValueScheduler {
       // slope must not be read as a negative delta. It is deliberately not
       // the curve's monotonicity guarantee — that lives at the boundary, in
       // `normalizeCurvePoints`, so it holds for the uncapped tick below and
-      // for the exported k6 runtime, neither of which reaches this line
+      // for the k6 export, neither of which reaches this line
       // (#332).
       rawNext = Math.max(delivered, rawNext);
     }

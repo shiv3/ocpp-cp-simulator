@@ -44,8 +44,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "build:cli": "bun run scripts/build-cli.ts",
-    "build:cli:bun": "bun build --target=bun --outfile=dist-cli/main.js --metafile=dist-cli/.metafile.json apps/cli/src/main.ts && bun run scripts/generate-cli-notices.ts dist-cli/.metafile.json && rm dist-cli/.metafile.json",
+    "build:cli": "bun run gen:k6-engine && bun run scripts/build-cli.ts",
+    "build:cli:bun": "bun run gen:k6-engine && bun build --target=bun --outfile=dist-cli/main.js --metafile=dist-cli/.metafile.json apps/cli/src/main.ts && bun run scripts/generate-cli-notices.ts dist-cli/.metafile.json && rm dist-cli/.metafile.json",
     "test": "vitest run && bun run test:bun",
     "test:vitest": "vitest run",
     "test:bun": "bun test --isolate bun.test",
@@ -70,7 +70,7 @@
     "cli": "bun apps/cli/src/main.ts",
     "fetch:ocpp": "bash scripts/fetch-ocpp-schemas.sh",
     "gen:ocpp": "bun run scripts/generate-ocpp.ts",
-    "gen:k6-runtime": "bun run scripts/generate-k6-runtime.ts"
+    "gen:k6-engine": "bun run scripts/generate-k6-engine.ts"
   },
   "dependencies": {
     "@evicons/react": "0.11.0",

@@ -8,10 +8,10 @@ import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { Transaction } from "../../../domain/connector/Transaction";
 import { BunSqliteDatabase } from "../../persistence/BunSqliteDatabase";
 import { SqlitePendingMessageRepository } from "../../persistence/SqlitePendingMessageRepository";
-import { strictValidationErrors } from "@ocpp-cp-simulator/ocpp/validate";
-import { v201Schemas } from "@ocpp-cp-simulator/ocpp/v201/schemas";
-import { v21Schemas } from "@ocpp-cp-simulator/ocpp/v21/schemas";
-import type { TransactionEventRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
+import { strictValidationErrors } from "@ocpp-cp-simulator/ocpp/validation";
+import { v201Schemas } from "@ocpp-cp-simulator/ocpp/v201";
+import { v21Schemas } from "@ocpp-cp-simulator/ocpp/v21";
+import type { TransactionEventRequestV201 } from "@ocpp-cp-simulator/ocpp";
 import { StationTopology } from "../../../domain/topology/StationTopology";
 
 /**

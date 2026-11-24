@@ -2,7 +2,7 @@
 
 import Ajv from "ajv";
 import type { AnySchema, AnySchemaObject, ValidateFunction } from "ajv";
-import draft06MetaSchema from "ajv/dist/refs/json-schema-draft-06.json";
+import draft06MetaSchema from "ajv/dist/refs/json-schema-draft-06.json" with { type: "json" };
 import Ajv04 from "ajv-draft-04";
 
 interface SchemaCompiler {

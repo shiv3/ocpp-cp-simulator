@@ -1,7 +1,7 @@
 import type {
   SetVariablesRequestV201,
   SetVariablesResponseV201,
-} from "@ocpp-cp-simulator/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp";
 import type { ConfigurationStore } from "../../../domain/charge-point/ConfigurationStore";
 import type { DeviceModelContext } from "./getVariablesV201";
 import { resolveDeviceModelVariable } from "./deviceModelMap";

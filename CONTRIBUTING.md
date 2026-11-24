@@ -6,7 +6,7 @@
 
 ## Checks
 
-Before pushing, run the checks CI runs: `bun run lint`, `bun run check:boundaries`, `bun run format:check`, `bun run typecheck` and `bun run test` ([Testing strategy](docs/analyses/testing-strategy.md)). Type errors fail the build.
+Before pushing, run the checks CI runs: `bun run lint`, `bun run check:boundaries`, `bun run format:check`, `bun run typecheck` and `bun run test` ([Testing strategy](docs/analyses/testing-strategy.md)). Type errors fail the build. When you change `packages/ocpp`, its manifest or `scripts/generate-ocpp.ts`, also run `bun run check:ocpp-pack`: CI runs it too. It builds the publishable package, packs it, installs the tarball with npm outside the workspace (network needed) and imports every public entry point under Node and Bun ([Overview → publishable packages/ocpp](docs/overview.md#publishable-packagesocpp)). It publishes nothing.
 
 ## Issues and pull requests
 

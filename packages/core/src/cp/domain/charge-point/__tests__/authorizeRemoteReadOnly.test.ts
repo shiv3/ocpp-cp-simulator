@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { NotifyReportRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
+import type { NotifyReportRequestV201 } from "@ocpp-cp-simulator/ocpp";
 import { handleGetBaseReportV201 } from "../../../infrastructure/transport/v201/inboundRegistryV201";
 import { handleSetVariablesV201 } from "../../../infrastructure/transport/v201/setVariablesV201";
 import { ChangeConfigurationHandler } from "../../../infrastructure/transport/handlers/call/OtherCallHandlers";

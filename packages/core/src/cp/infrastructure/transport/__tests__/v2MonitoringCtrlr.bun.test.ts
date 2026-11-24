@@ -4,13 +4,13 @@ import {
   isValidNotifyEventRequestV201,
   isValidNotifyReportRequestV201,
   isValidSetVariablesResponseV201,
-} from "@ocpp-cp-simulator/ocpp/v201/index";
+} from "@ocpp-cp-simulator/ocpp/v201";
 import {
   isValidGetVariablesResponseV21,
   isValidNotifyEventRequestV21,
   isValidNotifyReportRequestV21,
   isValidSetVariablesResponseV21,
-} from "@ocpp-cp-simulator/ocpp/v21/index";
+} from "@ocpp-cp-simulator/ocpp/v21";
 import { answerTo, startMockCsms, type MockCsms } from "./mockCsms";
 import { bootedChargePoint, callOf } from "./stationHarness";
 

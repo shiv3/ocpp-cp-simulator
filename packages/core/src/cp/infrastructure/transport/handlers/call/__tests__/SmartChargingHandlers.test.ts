@@ -4,7 +4,7 @@ import {
   ClearChargingProfileHandler,
   GetCompositeScheduleHandler,
 } from "../SmartChargingHandlers";
-import { isValidGetCompositeScheduleResponseV16 } from "@ocpp-cp-simulator/ocpp/index";
+import { isValidGetCompositeScheduleResponseV16 } from "@ocpp-cp-simulator/ocpp";
 import type { HandlerContext } from "../../MessageHandlerRegistry";
 import type { ChargePoint } from "../../../../../domain/charge-point/ChargePoint";
 import { createChargePoint } from "../../../../charge-point/createChargePoint";

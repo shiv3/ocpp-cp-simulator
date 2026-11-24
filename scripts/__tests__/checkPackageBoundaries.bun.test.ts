@@ -7,6 +7,7 @@ import {
   PACKAGE_NAMES,
   REPO_ROOT,
   checkBoundaries,
+  checkPublishable,
   extractImports,
   formatReport,
   hasFailures,
@@ -14,6 +15,7 @@ import {
   layerViolationOf,
   loadConfig,
   loadSnapshot,
+  packageRootOf,
   readAliases,
   resolveExport,
   resolveSpecifier,
@@ -403,6 +405,53 @@ describe("workspace package specifiers", () => {
     expect(resolveExport({ "./a": "./a.ts" }, "./b")).toBeNull();
   });
 
+  it("resolves conditional exports in key order, like Node (#1053)", () => {
+    const map = {
+      ".": { types: "./lib/i.d.ts", default: "./lib/i.js" },
+      "./v16": { node: { import: "./n.js" }, default: "./d.js" },
+      "./hidden": null,
+      "./t/*": { types: "./lib/t/*.d.ts", default: "./lib/t/*.js" },
+    };
+    // the workspace conditions: TypeScript's "types" comes first
+    expect(resolveExport(map, ".")).toBe("./lib/i.d.ts");
+    expect(resolveExport(map, ".", ["import"])).toBe("./lib/i.js");
+    // nested conditions; a condition that is not active is skipped
+    expect(resolveExport(map, "./v16", ["node", "import"])).toBe("./n.js");
+    expect(resolveExport(map, "./v16", ["import"])).toBe("./d.js");
+    expect(resolveExport(map, "./hidden")).toBeNull();
+    expect(resolveExport(map, "./t/a-b")).toBe("./lib/t/a-b.d.ts");
+    expect(resolveExport({ ".": { browser: "./b.js" } }, ".")).toBeNull();
+  });
+
+  it("only the curated entries of packages/ocpp resolve in the real tree", () => {
+    const m = loadSnapshot(REPO_ROOT).manifests!.get("ocpp")!;
+    const known = new Set([
+      "packages/ocpp/src/index.ts",
+      "packages/ocpp/src/v201/index.ts",
+      "packages/ocpp/src/v201/types/authorize-request.ts",
+      "packages/ocpp/src/validate.ts",
+    ]);
+    const at = (spec: string) =>
+      resolveSpecifier(
+        "packages/core/src/a.ts",
+        spec,
+        known,
+        {},
+        new Map([["@ocpp-cp-simulator/ocpp", m]]),
+      );
+    expect(at("@ocpp-cp-simulator/ocpp")).toEqual({
+      path: "packages/ocpp/src/index.ts",
+      viaPackage: true,
+    });
+    expect(at("@ocpp-cp-simulator/ocpp/v201/types/authorize-request")).toEqual({
+      path: "packages/ocpp/src/v201/types/authorize-request.ts",
+      viaPackage: true,
+    });
+    expect(at("@ocpp-cp-simulator/ocpp/validate")).toEqual({
+      unresolved: "@ocpp-cp-simulator/ocpp/validate",
+    });
+  });
+
   it("resolves @ocpp-cp-simulator/<pkg>/<path> to a file, or reports it unresolved", () => {
     const manifests = new Map<string, PackageManifest>([
       [
@@ -462,6 +511,18 @@ describe("package manifests", () => {
     name: `@ocpp-cp-simulator/${pkg.split("/")[1]}`,
     private: true,
     exports: pkg.startsWith("packages/") ? { "./*": "./src/*.ts" } : undefined,
+    // packages/ocpp is publishable: see "publishable packages" below
+    ...(pkg === "packages/ocpp"
+      ? {
+          private: false,
+          exports: { ".": "./src/index.ts" },
+          publishConfig: {
+            exports: {
+              ".": { types: "./lib/index.d.ts", default: "./lib/index.js" },
+            },
+          },
+        }
+      : {}),
     ...extra,
   });
   const all = (overrides: Record<string, Partial<PackageManifest>> = {}) =>
@@ -698,5 +759,123 @@ describe("layer direction inside src/cp (#571)", () => {
   it("every exemption of the real tree carries a reason", () => {
     for (const e of DEFAULT_CONFIG.layerExemptions)
       expect(e.why.length).toBeGreaterThan(20);
+  });
+});
+
+describe("publishable packages (#1053)", () => {
+  const good: PackageManifest = {
+    dir: "packages/ocpp",
+    name: "@ocpp-cp-simulator/ocpp",
+    private: false,
+    exports: {
+      ".": "./src/index.ts",
+      "./v16/types/*": "./src/v16/types/*.ts",
+      "./package.json": "./package.json",
+    },
+    publishConfig: {
+      exports: {
+        ".": { types: "./lib/index.d.ts", default: "./lib/index.js" },
+        "./v16/types/*": {
+          types: "./lib/v16/types/*.d.ts",
+          default: "./lib/v16/types/*.js",
+        },
+        "./package.json": "./package.json",
+      },
+    },
+    dependencies: { ajv: "^8.0.0" },
+  };
+  const where = "packages/ocpp/package.json";
+  const check = (m: Partial<PackageManifest>, imported = ["ajv"]) =>
+    checkPublishable({ ...good, ...m }, where, new Set(imported));
+
+  it("accepts a private: false manifest whose published entries mirror exports", () => {
+    expect(check({})).toEqual([]);
+  });
+
+  it("the real packages/ocpp manifest passes", () => {
+    const m = loadSnapshot(REPO_ROOT).manifests!.get("ocpp")!;
+    expect(
+      checkPublishable(m, where, new Set(["ajv", "ajv-draft-04"])),
+    ).toEqual([]);
+  });
+
+  it("still requires private elsewhere, and private: false here", () => {
+    expect(check({ private: true })).toEqual([
+      `${where}: a publishable package must say "private": false`,
+    ]);
+    expect(check({ private: undefined })).toEqual([
+      `${where}: a publishable package must say "private": false`,
+    ]);
+  });
+
+  it("reports published entries that drift from exports", () => {
+    expect(check({ publishConfig: undefined })).toEqual([
+      `${where}: a publishable package needs "publishConfig.exports"`,
+    ]);
+    expect(
+      check({
+        publishConfig: {
+          exports: {
+            ".": { default: "./lib/index.js", types: "./lib/index.d.ts" },
+            "./v16/types/*": {
+              types: "./lib/v16/types/*.d.ts",
+              default: "./lib/v16/x/*.js",
+            },
+            "./package.json": "./package.json",
+            "./extra": "./lib/extra.js",
+          },
+        },
+      }),
+    ).toEqual([
+      `${where}: "publishConfig.exports" keys (., ./extra, ./package.json, ./v16/types/*) differ from "exports" keys (., ./package.json, ./v16/types/*)`,
+      `${where}: published "." must list "types" first and "default" last`,
+      `${where}: published "./v16/types/*" default is "./lib/v16/x/*.js", expected "./lib/v16/types/*.js" (built from ./src/v16/types/*.ts)`,
+      `${where}: published "./extra" must equal its workspace target or be { "types", "default" }`,
+    ]);
+  });
+
+  it("requires exactly the imported third-party packages as dependencies", () => {
+    expect(check({}, ["ajv", "ajv-draft-04"])).toEqual([
+      `${where}: imports ajv-draft-04 but does not declare it in "dependencies"`,
+    ]);
+    expect(check({}, [])).toEqual([
+      `${where}: declares ajv but nothing imports it`,
+    ]);
+    expect(
+      check({ dependencies: undefined, peerDependencies: { ajv: "^8" } }),
+    ).toEqual([]);
+    expect(packageRootOf("ajv/dist/refs/x.json")).toBe("ajv");
+    expect(packageRootOf("@scope/pkg/sub")).toBe("@scope/pkg");
+  });
+
+  it("collects third-party imports from the package's non-test sources", () => {
+    const manifests = new Map(
+      PACKAGE_NAMES.map((p): [typeof p, PackageManifest] => [
+        p,
+        p === "ocpp"
+          ? { ...good, dependencies: {} }
+          : {
+              dir: PACKAGE_DIRS[p],
+              name: `@ocpp-cp-simulator/${PACKAGE_DIRS[p].split("/")[1]}`,
+              private: true,
+              exports: p.startsWith("apps/")
+                ? undefined
+                : { "./*": "./src/*.ts" },
+            },
+      ]),
+    );
+    const r = checkBoundaries({
+      ...snapshot({
+        "packages/ocpp/src/a.ts":
+          'import Ajv from "ajv";\nimport s from "ajv/dist/refs/x.json" with { type: "json" };\nimport { b } from "./b.js";',
+        "packages/ocpp/src/b.ts": "export const b = 1;",
+        "packages/ocpp/src/__tests__/a.test.ts": 'import { it } from "vitest";',
+      }),
+      manifests,
+      rootManifestText: "{}",
+    });
+    expect(r.manifestProblems).toEqual([
+      `${where}: imports ajv but does not declare it in "dependencies"`,
+    ]);
   });
 });

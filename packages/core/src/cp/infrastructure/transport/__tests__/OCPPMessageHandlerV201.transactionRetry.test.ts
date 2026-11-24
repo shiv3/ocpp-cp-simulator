@@ -6,7 +6,7 @@ import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { ChargePointEvents } from "../../../domain/charge-point/ChargePointEvents";
 import type { Transaction } from "../../../domain/connector/Transaction";
 import { OCPPMessageType } from "../../../domain/types/OcppTypes";
-import type { TransactionEventRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
+import type { TransactionEventRequestV201 } from "@ocpp-cp-simulator/ocpp";
 import { StationTopology } from "../../../domain/topology/StationTopology";
 
 /**

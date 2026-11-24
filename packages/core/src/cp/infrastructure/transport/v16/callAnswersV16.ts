@@ -7,7 +7,7 @@ import type {
   StartTransactionRequestV16,
   StartTransactionResponseV16,
   StopTransactionRequestV16,
-} from "@ocpp-cp-simulator/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp";
 import type { OcppMessageErrorPayload } from "../OCPPWebSocket";
 import type { CallWaiters } from "../CallWaiters";
 import type { ExpertCalls } from "../ExpertCalls";

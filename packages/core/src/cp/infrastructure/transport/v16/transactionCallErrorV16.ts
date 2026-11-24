@@ -2,7 +2,7 @@
 // CALLERROR (#527) and its discard limits, split out of SerialCallQueueV16
 // (#877). The queue state stays in SerialCallQueueV16; this reaches it only
 // through the context below.
-import type { StartTransactionRequestV16 } from "@ocpp-cp-simulator/ocpp/index";
+import type { StartTransactionRequestV16 } from "@ocpp-cp-simulator/ocpp";
 import type { OcppMessageRequestPayload } from "../OCPPWebSocket";
 import type { Transaction } from "../../../domain/connector/Transaction";
 import { isRunningTransactionStartedBy } from "../../../domain/connector/Transaction";

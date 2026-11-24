@@ -4,4 +4,4 @@ export type {
   ReportDataType,
   VariableAttributeType,
   VariableCharacteristicsType,
-} from "../../v201/types/notify-report-request";
+} from "../../v201/types/notify-report-request.js";

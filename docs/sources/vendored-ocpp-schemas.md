@@ -6,13 +6,14 @@ sources:
   - packages/ocpp/vendor/ocpp-schemas/NOTICE
   - scripts/fetch-ocpp-schemas.sh
   - scripts/generate-ocpp.ts
+  - scripts/build-ocpp-package.ts
   - apps/cli/src/server/mcp/schemaResources.ts
   - packages/core/src/cp/infrastructure/transport/codec/__tests__/vendoredOcaSchemas.test.ts
 related:
   - ../concepts/ocpp-versions-and-transports.md
   - ../entities/mcp-endpoint.md
   - ../analyses/ocpp-protocol-stack.md
-updated: 2026-11-15
+updated: 2026-11-24
 ---
 
 # Source: `packages/ocpp/vendor/ocpp-schemas/`
@@ -51,6 +52,12 @@ enumeration adds `Celsius` beside the `Celcius` typo.
   `packages/ocpp/src/schemaSources.ts`, which [MCP endpoint → OCPP schema
   resources](../entities/mcp-endpoint.md#ocpp-schema-resources) serves byte for byte, with the
   license link in every resource description (#613).
+- The publishable `@ocpp-cp-simulator/ocpp` package carries the directory
+  unmodified: `scripts/build-ocpp-package.ts` copies `vendor/ocpp-schemas/`
+  (with `NOTICE`) into `packages/ocpp/dist/` byte for byte rather than taking
+  the JSON tsc re-serializes, and `bun run check:ocpp-pack` fails when the
+  tarball lacks `vendor/ocpp-schemas/NOTICE` (#1053;
+  [Overview → publishable packages/ocpp](../overview.md#publishable-packagesocpp)).
 
 **Why it matters for the wiki.** This is the ground truth for message field
 names and enums across the three JSON versions the simulator speaks

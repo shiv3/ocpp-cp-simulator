@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { v16Schemas } from "@ocpp-cp-simulator/ocpp/v16/schemas";
-import { v201Schemas } from "@ocpp-cp-simulator/ocpp/v201/schemas";
-import { validationErrors } from "@ocpp-cp-simulator/ocpp/validate";
+import { v16Schemas } from "@ocpp-cp-simulator/ocpp/v16";
+import { v201Schemas } from "@ocpp-cp-simulator/ocpp/v201";
+import { validationErrors } from "@ocpp-cp-simulator/ocpp/validation";
 
 /**
  * #1064 — the vendored schemas are the OCA originals, not the patched copies

@@ -1,6 +1,6 @@
 // Inbound CALL handling of OCPPMessageHandler (#877): the gate, the registry
 // lookup, validation and the answer through the exchange.
-import { OCPPErrorCodeV16 } from "@ocpp-cp-simulator/ocpp/index";
+import { OCPPErrorCodeV16 } from "@ocpp-cp-simulator/ocpp";
 import { behaviorTapOf } from "../behaviorTap";
 import type { OCPPWebSocket } from "../OCPPWebSocket";
 import { normalizeHandlerResult, type HandlerResult } from "../network-sim";

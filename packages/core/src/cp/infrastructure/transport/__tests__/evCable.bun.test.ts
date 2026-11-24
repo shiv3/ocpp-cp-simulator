@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import type {
   StopTransactionRequestV16,
   TransactionEventRequestV201,
-} from "@ocpp-cp-simulator/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp";
 import {
   answerTo,
   startMockCsms,

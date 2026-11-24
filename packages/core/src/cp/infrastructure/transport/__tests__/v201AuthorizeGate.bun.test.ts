@@ -2,7 +2,7 @@ import { describe, it, expect } from "bun:test";
 import type {
   AuthorizeRequestV201,
   TransactionEventRequestV201,
-} from "@ocpp-cp-simulator/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { createChargePoint } from "../../charge-point/createChargePoint";

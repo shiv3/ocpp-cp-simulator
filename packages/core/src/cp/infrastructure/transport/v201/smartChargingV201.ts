@@ -8,7 +8,7 @@ import type {
   GetCompositeScheduleResponseV201,
   SetChargingProfileRequestV201,
   SetChargingProfileResponseV201,
-} from "@ocpp-cp-simulator/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp";
 import type {
   ChargingProfileType as ReportChargingProfileType,
   ReportChargingProfilesRequestV201,

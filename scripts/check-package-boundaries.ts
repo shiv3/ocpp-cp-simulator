@@ -543,31 +543,78 @@ const RESOLVE_SUFFIXES = [
   "/index.tsx",
 ];
 
+/**
+ * One `exports` value: a path, `null` (the subpath is hidden), or conditions
+ * (`{ "types": ..., "default": ... }`) tried in key order, possibly nested.
+ */
+export type ExportTarget =
+  string | null | { readonly [condition: string]: ExportTarget };
+
+export type ExportsMap = Readonly<Record<string, ExportTarget>>;
+
 export interface PackageManifest {
   /** Repo-relative workspace directory. */
   readonly dir: string;
   readonly name?: string;
   readonly private?: boolean;
-  readonly exports?: Readonly<Record<string, string>>;
+  readonly exports?: ExportsMap;
+  /** The entry points of the built package (PUBLISHABLE_PACKAGES only). */
+  readonly publishConfig?: { readonly exports?: ExportsMap };
   readonly dependencies?: Readonly<Record<string, string>>;
+  readonly peerDependencies?: Readonly<Record<string, string>>;
 }
 
 /** What `exports` is when a manifest is not at hand: the "./*" convention. */
-const DEFAULT_EXPORTS: Readonly<Record<string, string>> = {
+const DEFAULT_EXPORTS: ExportsMap = {
   "./*": "./src/*.ts",
 };
 
 /**
+ * The conditions the workspace resolves `exports` with: those TypeScript's
+ * bundler resolution, Vite and Bun all match for an `import`.
+ */
+export const WORKSPACE_CONDITIONS: readonly string[] = ["types", "import"];
+
+/**
+ * Packages built and packed for use outside the monorepo (#1053). Their
+ * manifest is `"private": false`, declares its third-party runtime
+ * dependencies, and carries the built package's entry points in
+ * `publishConfig.exports` (scripts/build-ocpp-package.ts hoists them into
+ * dist/package.json). Every other workspace manifest stays private.
+ */
+export const PUBLISHABLE_PACKAGES: ReadonlySet<PackageName> = new Set(["ocpp"]);
+
+/**
+ * Node's rule for a conditional target: the first key (in object order) that
+ * is "default" or one of `conditions` and resolves to a path wins.
+ */
+function pickTarget(
+  target: ExportTarget | undefined,
+  conditions: readonly string[],
+): string | null {
+  if (target === undefined || target === null) return null;
+  if (typeof target === "string") return target;
+  for (const [condition, inner] of Object.entries(target)) {
+    if (condition !== "default" && !conditions.includes(condition)) continue;
+    const picked = pickTarget(inner, conditions);
+    if (picked !== null) return picked;
+  }
+  return null;
+}
+
+/**
  * The file a package subpath (`./cp/domain/x`) maps to under `exports`: an
  * exact key first, then the pattern with the longest prefix before its `*`.
- * Returns the target relative to the package directory, or null.
+ * A conditional value is resolved with `conditions` (WORKSPACE_CONDITIONS by
+ * default). Returns the target relative to the package directory, or null.
  */
 export function resolveExport(
-  exportsMap: Readonly<Record<string, string>>,
+  exportsMap: ExportsMap,
   subpath: string,
+  conditions: readonly string[] = WORKSPACE_CONDITIONS,
 ): string | null {
-  const exact = exportsMap[subpath];
-  if (typeof exact === "string") return exact;
+  if (Object.hasOwn(exportsMap, subpath))
+    return pickTarget(exportsMap[subpath], conditions);
   let best: { key: string; prefix: number } | null = null;
   for (const key of Object.keys(exportsMap)) {
     const star = key.indexOf("*");
@@ -588,7 +635,8 @@ export function resolveExport(
     star,
     subpath.length - (best.key.length - star - 1),
   );
-  return exportsMap[best.key]!.replace("*", matched);
+  const target = pickTarget(exportsMap[best.key], conditions);
+  return target === null ? null : target.replaceAll("*", matched);
 }
 
 const PACKAGE_SPECIFIER = /^(@ocpp-cp-simulator\/[^/]+)(?:\/(.*))?$/;
@@ -934,7 +982,7 @@ export function checkBoundaries(
   return {
     violations,
     warnings,
-    manifestProblems: checkManifests(snapshot, edges, violations),
+    manifestProblems: checkManifests(snapshot, edges, violations, config.map),
     unmapped: [...new Set(unmapped)].sort(),
     unresolved,
     matrix,
@@ -1002,9 +1050,105 @@ export function findImportCycles(edges: readonly Edge[]): string[][] {
   return cycles.sort(([a], [b]) => (a! < b! ? -1 : 1));
 }
 
+/** `ajv/dist/refs/x.json` -> `ajv`, `@scope/pkg/x` -> `@scope/pkg`. */
+export function packageRootOf(specifier: string): string {
+  const parts = specifier.split("/");
+  return specifier.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0]!;
+}
+
+/** True for a specifier that names an installed (npm) package. */
+function isThirdParty(specifier: string): boolean {
+  return (
+    !specifier.startsWith(".") &&
+    !specifier.startsWith("/") &&
+    !specifier.startsWith("@ocpp-cp-simulator/") &&
+    !/^[a-z]+:/.test(specifier)
+  );
+}
+
+/**
+ * What a PUBLISHABLE_PACKAGES manifest must say on top of the common rules:
+ * `"private": false`; a `publishConfig.exports` with exactly the keys of
+ * `exports`, each entry `{ "types", ..., "default" }` (TypeScript needs
+ * "types" first, Node needs "default" last) and pointing at the built form
+ * of the workspace target (`./src/x.ts` -> `./lib/x.d.ts` / `./lib/x.js`); no
+ * `workspace:` range; and exactly the third-party packages its non-test
+ * sources import in `dependencies` or `peerDependencies` (a monorepo resolves
+ * an undeclared one from the root manifest, an installed package cannot).
+ */
+export function checkPublishable(
+  manifest: PackageManifest,
+  where: string,
+  imported: ReadonlySet<string>,
+): string[] {
+  const problems: string[] = [];
+  if (manifest.private !== false)
+    problems.push(`${where}: a publishable package must say "private": false`);
+  const workspace = manifest.exports ?? {};
+  const published = manifest.publishConfig?.exports;
+  if (!published) {
+    problems.push(
+      `${where}: a publishable package needs "publishConfig.exports"`,
+    );
+  } else {
+    const a = Object.keys(workspace).sort().join(", ");
+    const b = Object.keys(published).sort().join(", ");
+    if (a !== b)
+      problems.push(
+        `${where}: "publishConfig.exports" keys (${b}) differ from "exports" keys (${a})`,
+      );
+    for (const [key, target] of Object.entries(published)) {
+      const source = workspace[key];
+      if (typeof target === "string" || typeof source !== "string") {
+        if (target !== source)
+          problems.push(
+            `${where}: published "${key}" must equal its workspace target or be { "types", "default" }`,
+          );
+        continue;
+      }
+      const conditions = target ? Object.keys(target) : [];
+      if (conditions[0] !== "types" || conditions.at(-1) !== "default") {
+        problems.push(
+          `${where}: published "${key}" must list "types" first and "default" last`,
+        );
+        continue;
+      }
+      const lib = source.replace(/^\.\/src\//, "./lib/").replace(/\.ts$/, "");
+      const want = { types: `${lib}.d.ts`, default: `${lib}.js` };
+      for (const c of ["types", "default"] as const) {
+        const got = (target as Record<string, ExportTarget>)[c];
+        if (got !== want[c])
+          problems.push(
+            `${where}: published "${key}" ${c} is ${JSON.stringify(got)}, expected "${want[c]}" (built from ${source})`,
+          );
+      }
+    }
+  }
+  const declared = new Set([
+    ...Object.keys(manifest.dependencies ?? {}),
+    ...Object.keys(manifest.peerDependencies ?? {}),
+  ]);
+  for (const [name, range] of Object.entries(manifest.dependencies ?? {}))
+    if (
+      range.startsWith("workspace:") &&
+      !name.startsWith("@ocpp-cp-simulator/")
+    )
+      problems.push(`${where}: ${name} uses "${range}"`);
+  for (const name of [...imported].sort())
+    if (!declared.has(name))
+      problems.push(
+        `${where}: imports ${name} but does not declare it in "dependencies"`,
+      );
+  for (const name of [...declared].sort())
+    if (!name.startsWith("@ocpp-cp-simulator/") && !imported.has(name))
+      problems.push(`${where}: declares ${name} but nothing imports it`);
+  return problems;
+}
+
 /**
  * Each package's package.json has to say what the code does: its name, that
- * it is private, and exactly the `workspace:*` dependencies its imports need
+ * it is private (or, for PUBLISHABLE_PACKAGES, what checkPublishable asks),
+ * and exactly the `workspace:*` dependencies its imports need
  * (a package-specifier import of another package; type-only imports count,
  * allow-listed ones do not). The root package.json is the published CLI and
  * must not depend on a workspace package, or the tarball would not install
@@ -1014,9 +1158,19 @@ export function checkManifests(
   snapshot: Snapshot,
   edges: readonly Edge[],
   violations: readonly Violation[],
+  map: readonly MapEntry[] = PACKAGE_MAP,
 ): string[] {
   if (!snapshot.manifests) return [];
   const problems: string[] = [];
+  const thirdParty = new Map<PackageName, Set<string>>();
+  for (const [file, text] of snapshot.sources) {
+    const pkg = packageOf(file, map);
+    if (!pkg || !PUBLISHABLE_PACKAGES.has(pkg) || isTestFile(file)) continue;
+    const set = thirdParty.get(pkg) ?? new Set<string>();
+    for (const imp of extractImports(file, text))
+      if (isThirdParty(imp.specifier)) set.add(packageRootOf(imp.specifier));
+    thirdParty.set(pkg, set);
+  }
   const rejected = new Set(violations.map((v) => `${v.file}\0${v.target}`));
   for (const pkg of PACKAGE_NAMES) {
     const dir = PACKAGE_DIRS[pkg];
@@ -1030,7 +1184,11 @@ export function checkManifests(
       problems.push(
         `${where}: name is ${JSON.stringify(manifest.name)}, expected "${packageNameOf(pkg)}"`,
       );
-    if (manifest.private !== true)
+    if (PUBLISHABLE_PACKAGES.has(pkg))
+      problems.push(
+        ...checkPublishable(manifest, where, thirdParty.get(pkg) ?? new Set()),
+      );
+    else if (manifest.private !== true)
       problems.push(`${where}: "private" must be true`);
     if (pkg.startsWith("apps/") === false && !manifest.exports)
       problems.push(`${where}: a package needs an "exports" map`);

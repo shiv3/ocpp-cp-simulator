@@ -1,7 +1,4 @@
-import {
-  OCPPErrorCodeV16,
-  OCPPErrorCodeV201,
-} from "@ocpp-cp-simulator/ocpp/enums";
+import { OCPPErrorCodeV16, OCPPErrorCodeV201 } from "@ocpp-cp-simulator/ocpp";
 import type { ViolationKind } from "./violationKind";
 
 /**

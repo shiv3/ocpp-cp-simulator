@@ -1,4 +1,4 @@
-import { schemas } from "@ocpp-cp-simulator/ocpp/index";
+import { schemas } from "@ocpp-cp-simulator/ocpp";
 import { OCPP_2_1 } from "../types/OcppVersion";
 
 type MeterValuesSchema = {

@@ -29,7 +29,7 @@ import type {
   ResetResponseV16,
   TriggerMessageResponseV16,
   UnlockConnectorResponseV16,
-} from "@ocpp-cp-simulator/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp";
 import {
   NetworkSimController,
   type ControllerHost,

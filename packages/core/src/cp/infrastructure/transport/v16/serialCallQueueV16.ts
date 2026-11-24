@@ -2,7 +2,7 @@
 // §4.1.1 serial queue, the #565 hold and start outcomes, salvage to the
 // offline queue, and the §3.7.1 resend of a transaction-related message
 // after a CALLERROR (#527) with its discard limits.
-import type { StartTransactionRequestV16 } from "@ocpp-cp-simulator/ocpp/index";
+import type { StartTransactionRequestV16 } from "@ocpp-cp-simulator/ocpp";
 import type {
   OCPPWebSocket,
   OcppMessageRequestPayload,

@@ -6,7 +6,7 @@ import {
   isValidNotifyMonitoringReportRequestV201,
   isValidSetMonitoringBaseResponseV201,
   isValidSetVariableMonitoringResponseV201,
-} from "@ocpp-cp-simulator/ocpp/v201/index";
+} from "@ocpp-cp-simulator/ocpp/v201";
 import {
   isValidClearVariableMonitoringResponseV21,
   isValidGetMonitoringReportResponseV21,
@@ -14,7 +14,7 @@ import {
   isValidNotifyMonitoringReportRequestV21,
   isValidSetMonitoringBaseResponseV21,
   isValidSetVariableMonitoringResponseV21,
-} from "@ocpp-cp-simulator/ocpp/v21/index";
+} from "@ocpp-cp-simulator/ocpp/v21";
 import { answerTo, startMockCsms, type MockCsms } from "./mockCsms";
 import { bootedChargePoint, callOf, stationFor } from "./stationHarness";
 import { BunSqliteDatabase } from "../../persistence/BunSqliteDatabase";

@@ -13,7 +13,7 @@ import type {
   SignCertificateResponseV16,
   SignedFirmwareStatusNotificationResponseV16,
   StatusNotificationResponseV16,
-} from "@ocpp-cp-simulator/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp";
 import { LogType } from "../../../../shared/Logger";
 
 export class HeartbeatResultHandler implements CallResultHandler<HeartbeatResponseV16> {

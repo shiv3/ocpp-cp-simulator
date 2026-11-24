@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   strictValidationErrors,
   validationErrors,
-} from "@ocpp-cp-simulator/ocpp/validate";
+} from "@ocpp-cp-simulator/ocpp/validation";
 
 /**
  * #285 — the formats the refusal gate depends on.

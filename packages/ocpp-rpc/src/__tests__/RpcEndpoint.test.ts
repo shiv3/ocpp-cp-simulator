@@ -22,10 +22,7 @@ import {
   type RpcEndpointOptions,
   type RpcProtocolProblem,
 } from "@ocpp-cp-simulator/ocpp-rpc/index";
-import {
-  OCPPErrorCodeV16,
-  OCPPErrorCodeV201,
-} from "@ocpp-cp-simulator/ocpp/index";
+import { OCPPErrorCodeV16, OCPPErrorCodeV201 } from "@ocpp-cp-simulator/ocpp";
 
 /** A clock that only moves when the test says so. */
 class FakeClock implements RpcClock {

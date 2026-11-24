@@ -3,7 +3,7 @@ import type {
   MeterValuesRequestV201,
   TransactionEventRequestV201,
   TransactionEventResponseV201,
-} from "@ocpp-cp-simulator/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp";
 import type { Logger } from "../../../shared/Logger";
 import { LogType } from "../../../shared/Logger";
 import {

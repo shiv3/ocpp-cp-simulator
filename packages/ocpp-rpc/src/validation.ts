@@ -1,8 +1,8 @@
-import { schemas } from "@ocpp-cp-simulator/ocpp/schemas";
+import { schemas } from "@ocpp-cp-simulator/ocpp";
 import {
   strictValidationIssues,
   validateOCPPPayload,
-} from "@ocpp-cp-simulator/ocpp/validate";
+} from "@ocpp-cp-simulator/ocpp/validation";
 import { violationKind, type ViolationKind } from "./violationKind";
 
 /** What the endpoint validates: an inbound CALL's or SEND's request, or an

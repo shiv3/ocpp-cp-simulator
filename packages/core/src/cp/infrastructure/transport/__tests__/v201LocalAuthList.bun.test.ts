@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { SendLocalListRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
+import type { SendLocalListRequestV201 } from "@ocpp-cp-simulator/ocpp";
 import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";

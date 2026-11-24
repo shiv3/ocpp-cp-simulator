@@ -2,7 +2,7 @@ import type { McpServer } from "mcp-lite";
 import {
   schemaNotice,
   schemaSources,
-} from "@ocpp-cp-simulator/ocpp/schemaSources";
+} from "@ocpp-cp-simulator/ocpp/schema-sources";
 
 /**
  * #613: the OCA JSON Schemas of every OCPP message as MCP resources, so an

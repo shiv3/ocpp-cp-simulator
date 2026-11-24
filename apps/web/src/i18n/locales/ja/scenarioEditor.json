@@ -171,6 +171,7 @@
   "scenarioEditor.params.logs.uploadMs": "アップロード時間 (ms)",
   "scenarioEditor.params.reset.delayMs": "リセットまでの遅延 (ms)",
   "scenarioEditor.params.unlock.outcome": "結果",
+  "scenarioEditor.params.transaction.remoteStart": "リモート開始",
   "scenarioEditor.node.notify": "通知",
   "scenarioEditor.node.switch": "分岐 (switch)",
   "scenarioEditor.node.choice": "抽選 (choice)",

@@ -172,6 +172,7 @@
   "scenarioEditor.params.logs.uploadMs": "Upload time (ms)",
   "scenarioEditor.params.reset.delayMs": "Delay before the reset (ms)",
   "scenarioEditor.params.unlock.outcome": "Outcome",
+  "scenarioEditor.params.transaction.remoteStart": "Remote start",
   "scenarioEditor.node.notify": "Notify",
   "scenarioEditor.node.switch": "Switch",
   "scenarioEditor.node.choice": "Choice",

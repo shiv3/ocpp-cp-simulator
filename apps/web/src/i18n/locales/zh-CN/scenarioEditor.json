@@ -171,6 +171,7 @@
   "scenarioEditor.params.logs.uploadMs": "上传时间 (ms)",
   "scenarioEditor.params.reset.delayMs": "重置前的延迟 (ms)",
   "scenarioEditor.params.unlock.outcome": "结果",
+  "scenarioEditor.params.transaction.remoteStart": "远程启动",
   "scenarioEditor.node.notify": "通知",
   "scenarioEditor.node.switch": "分支 (switch)",
   "scenarioEditor.node.choice": "抽选 (choice)",

@@ -71,6 +71,7 @@ describe("UseBehaviorForm params (#654)", () => {
       "default.logs",
       "default.reset",
       "default.signedFirmware",
+      "default.transaction",
       "default.unlock",
     ]);
   });

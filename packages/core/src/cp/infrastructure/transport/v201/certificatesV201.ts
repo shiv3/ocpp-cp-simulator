@@ -4,13 +4,13 @@ import type {
   DeleteCertificateRequestV201,
   GetInstalledCertificateIdsRequestV201,
   InstallCertificateRequestV201,
-} from "@ocpp-cp-simulator/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp";
 import type {
   CertificateSignedResponseV21,
   DeleteCertificateResponseV21,
   GetInstalledCertificateIdsResponseV21,
   InstallCertificateResponseV21,
-} from "@ocpp-cp-simulator/ocpp/v21/index";
+} from "@ocpp-cp-simulator/ocpp/v21";
 import type {
   DeleteCertificateOutcome,
   InstalledCertificateIds,

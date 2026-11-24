@@ -5,9 +5,9 @@ import type { Logger } from "../../../shared/Logger";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { BunSqliteDatabase } from "../../persistence/BunSqliteDatabase";
 import { SqlitePendingMessageRepository } from "../../persistence/SqlitePendingMessageRepository";
-import { strictValidationErrors } from "@ocpp-cp-simulator/ocpp/validate";
-import { v201Schemas } from "@ocpp-cp-simulator/ocpp/v201/schemas";
-import { v21Schemas } from "@ocpp-cp-simulator/ocpp/v21/schemas";
+import { strictValidationErrors } from "@ocpp-cp-simulator/ocpp/validation";
+import { v201Schemas } from "@ocpp-cp-simulator/ocpp/v201";
+import { v21Schemas } from "@ocpp-cp-simulator/ocpp/v21";
 
 /**
  * #552, A04.FR.02 with --state-db: a critical SecurityEventNotification

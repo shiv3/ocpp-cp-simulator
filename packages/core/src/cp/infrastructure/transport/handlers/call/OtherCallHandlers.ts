@@ -8,7 +8,7 @@ import type {
   TriggerMessageResponseV16,
   UnlockConnectorRequestV16,
   UnlockConnectorResponseV16,
-} from "@ocpp-cp-simulator/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp";
 import {
   isHandlerOutcome,
   type HandlerOutcome,

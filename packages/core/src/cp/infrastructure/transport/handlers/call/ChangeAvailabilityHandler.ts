@@ -2,7 +2,7 @@ import type { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
 import type {
   ChangeAvailabilityRequestV16,
   ChangeAvailabilityResponseV16,
-} from "@ocpp-cp-simulator/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp";
 import { defaultBehavior16 } from "./defaultBehavior";
 
 /**

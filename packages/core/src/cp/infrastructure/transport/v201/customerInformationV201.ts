@@ -2,7 +2,7 @@ import type {
   CustomerInformationRequestV201,
   CustomerInformationResponseV201,
   NotifyCustomerInformationRequestV201,
-} from "@ocpp-cp-simulator/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp";
 import type {
   V201HandlerResult,
   V201InboundContext,

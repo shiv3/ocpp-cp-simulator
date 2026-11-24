@@ -2,7 +2,7 @@
  * OCPP-S request/response shapes the SOAP client puts on (or reads from) the
  * wire, per dialect: 1.2, 1.5 and 1.6 SOAP. Types only.
  */
-import type { StopTransactionRequestV16 } from "@ocpp-cp-simulator/ocpp/index";
+import type { StopTransactionRequestV16 } from "@ocpp-cp-simulator/ocpp";
 
 export type IdTagInfoStatus =
   "Accepted" | "Blocked" | "Expired" | "Invalid" | "ConcurrentTx";

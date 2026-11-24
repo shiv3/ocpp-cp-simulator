@@ -1,6 +1,6 @@
 // GetReport `componentCriteria` (B08.FR.05, FR.07-FR.10, FR.13, #701),
 // evaluated on the report data the Device Model registry yields.
-import type { ReportDataType } from "@ocpp-cp-simulator/ocpp/types/v201/notify-report";
+import type { ReportDataType } from "@ocpp-cp-simulator/ocpp/v201";
 
 export type ComponentCriterion = "Active" | "Available" | "Enabled" | "Problem";
 

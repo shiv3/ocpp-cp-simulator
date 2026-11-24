@@ -2,7 +2,7 @@
 // entries, the request history and the predicates the delivery shares
 // with OCPPMessageHandler (#877).
 import { isCriticalSecurityEvent16 } from "../../../domain/security/securityEvents16";
-import type { MeterValuesRequestV16 } from "@ocpp-cp-simulator/ocpp/index";
+import type { MeterValuesRequestV16 } from "@ocpp-cp-simulator/ocpp";
 import type {
   OcppMessagePayload,
   OcppMessageRequestPayload,

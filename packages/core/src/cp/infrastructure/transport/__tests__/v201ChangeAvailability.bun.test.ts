@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import type { ChangeAvailabilityRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
+import type { ChangeAvailabilityRequestV201 } from "@ocpp-cp-simulator/ocpp";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
 import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";

@@ -12,7 +12,7 @@ import type {
   SetNetworkProfileRequestV201,
   SetNetworkProfileResponseV201,
   UnpublishFirmwareResponseV201,
-} from "@ocpp-cp-simulator/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp";
 import type {
   V201HandlerResult,
   V201InboundContext,

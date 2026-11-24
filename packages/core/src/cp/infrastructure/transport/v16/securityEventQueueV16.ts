@@ -1,7 +1,7 @@
 // OCPP 1.6 Security Whitepaper SecurityEventNotification.req of
 // OCPPMessageHandler (#877), with the A04.FR.02 offline queue of critical
 // events (#734).
-import type { SecurityEventNotificationRequestV16 } from "@ocpp-cp-simulator/ocpp/index";
+import type { SecurityEventNotificationRequestV16 } from "@ocpp-cp-simulator/ocpp";
 import { isCriticalSecurityEvent16 } from "../../../domain/security/securityEvents16";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { PendingMessageQueue } from "../../../domain/transport/PendingMessageQueue";

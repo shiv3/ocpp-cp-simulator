@@ -9,7 +9,7 @@ import {
   isValidInstallCertificateResponseV21,
   isValidSecurityEventNotificationRequestV201,
   isValidSecurityEventNotificationRequestV21,
-} from "@ocpp-cp-simulator/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp";
 import type { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
 import type { CertificateRepository } from "../../../../domain/persistence/CertificateRepository";
 import { computeCertificateHashData } from "../../../../domain/security/certificateHash";

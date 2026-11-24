@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import type {
   GetCompositeScheduleResponseV201,
   ReportChargingProfilesRequestV201,
-} from "@ocpp-cp-simulator/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";

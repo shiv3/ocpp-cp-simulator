@@ -17,7 +17,7 @@ import type {
   SignCertificateRequestV16,
   SignedFirmwareStatusNotificationRequestV16,
   StatusNotificationRequestV16,
-} from "@ocpp-cp-simulator/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp";
 import type {
   OcppMessageErrorPayload,
   OcppMessagePayload,

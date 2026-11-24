@@ -5,7 +5,7 @@ import type {
   MeterValuesRequestV16,
   StartTransactionRequestV16,
   StopTransactionRequestV16,
-} from "@ocpp-cp-simulator/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { Transaction } from "../../../domain/connector/Transaction";
 import {

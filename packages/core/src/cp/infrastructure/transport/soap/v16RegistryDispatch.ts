@@ -14,8 +14,8 @@ import { OCPPAction } from "../../../domain/types/OcppTypes";
 import {
   v16Schemas,
   type DataTransferRequestV16,
-} from "@ocpp-cp-simulator/ocpp/v16/index";
-import { strictValidationErrors } from "@ocpp-cp-simulator/ocpp/validate";
+} from "@ocpp-cp-simulator/ocpp/v16";
+import { strictValidationErrors } from "@ocpp-cp-simulator/ocpp/validation";
 import { OCPP_1_6_SOAP } from "../../../domain/types/OcppVersion";
 import {
   normalizeHandlerResult,

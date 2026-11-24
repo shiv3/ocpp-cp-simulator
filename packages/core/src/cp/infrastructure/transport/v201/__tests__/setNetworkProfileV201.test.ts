@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
-import type { SetNetworkProfileRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
-import { isValidSetNetworkProfileResponseV201 } from "@ocpp-cp-simulator/ocpp/v201/validators";
-import { isValidSetNetworkProfileResponseV21 } from "@ocpp-cp-simulator/ocpp/v21/validators";
+import type { SetNetworkProfileRequestV201 } from "@ocpp-cp-simulator/ocpp";
+import { isValidSetNetworkProfileResponseV201 } from "@ocpp-cp-simulator/ocpp/v201";
+import { isValidSetNetworkProfileResponseV21 } from "@ocpp-cp-simulator/ocpp/v21";
 import type { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
 import { makeChargePoint } from "../../../../domain/charge-point/__tests__/chargePointFixtures";
 import type { Logger } from "../../../../shared/Logger";

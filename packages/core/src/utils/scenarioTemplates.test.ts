@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ActionNameV16 } from "@ocpp-cp-simulator/ocpp/index";
+import { ActionNameV16 } from "@ocpp-cp-simulator/ocpp";
 
 import { scenarioTemplates } from "./scenarioTemplates";
 import {

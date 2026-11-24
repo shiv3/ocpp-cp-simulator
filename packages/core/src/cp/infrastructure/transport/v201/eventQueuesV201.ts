@@ -1,4 +1,4 @@
-import type { SecurityEventNotificationRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
+import type { SecurityEventNotificationRequestV201 } from "@ocpp-cp-simulator/ocpp";
 import type { Logger } from "../../../shared/Logger";
 import { LogType } from "../../../shared/Logger";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";

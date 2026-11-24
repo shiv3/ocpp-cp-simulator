@@ -18,7 +18,7 @@ import type {
   LogStatusNotificationRequestV201,
   StatusNotificationRequestV201,
   AuthorizeRequestV201,
-} from "@ocpp-cp-simulator/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp";
 import type { OCPPWebSocket } from "./OCPPWebSocket";
 import type { ProtocolCodec } from "./profile/ProtocolProfile";
 import { CallWaiters } from "./CallWaiters";

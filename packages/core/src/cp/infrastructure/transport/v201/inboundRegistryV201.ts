@@ -3,7 +3,7 @@ import type {
   FirmwareStatusNotificationRequestV201,
   LogStatusNotificationRequestV201,
   ReservationStatusUpdateRequestV201,
-} from "@ocpp-cp-simulator/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp";
 import type {
   AuthorizeRequestV201,
   BootNotificationRequestV201,
@@ -29,7 +29,7 @@ import type {
   SignCertificateRequestV201,
   StatusNotificationRequestV201,
   TransactionEventRequestV201,
-} from "@ocpp-cp-simulator/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp";
 import {
   isValidCancelReservationRequestV201,
   isValidCertificateSignedRequestV201,
@@ -71,15 +71,15 @@ import {
   isValidUnlockConnectorRequestV201,
   isValidUnpublishFirmwareRequestV201,
   isValidUpdateFirmwareRequestV201,
-} from "@ocpp-cp-simulator/ocpp/validation/v201/index";
-import type { ReportDataType } from "@ocpp-cp-simulator/ocpp/types/v201/notify-report";
+} from "@ocpp-cp-simulator/ocpp/validation";
+import type { ReportDataType } from "@ocpp-cp-simulator/ocpp/v201";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { matchesComponentVariable } from "../../../domain/monitoring/selectMonitors";
 import type { SignedCertificateUse } from "../../../domain/security/certificateUse";
 import { LogType, type Logger } from "../../../shared/Logger";
 import { REDACTED_VALUE } from "../../../shared/redaction";
 import { DEVICE_MODEL } from "../../../domain/device-model/DeviceModelRegistry";
-import type { SetVariablesResponseV201 } from "@ocpp-cp-simulator/ocpp/index";
+import type { SetVariablesResponseV201 } from "@ocpp-cp-simulator/ocpp";
 import { buildBaseReportData, selectReportBase } from "./baseReportV201";
 import { filterByComponentCriteria } from "./reportCriteria";
 import { splitIntoSizedParts } from "./reportParts";

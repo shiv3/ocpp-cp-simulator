@@ -5,14 +5,14 @@ import {
   isValidNotifyMonitoringReportRequestV201,
   isValidSetMonitoringLevelResponseV201,
   isValidSetVariableMonitoringResponseV201,
-} from "@ocpp-cp-simulator/ocpp/v201/index";
+} from "@ocpp-cp-simulator/ocpp/v201";
 import {
   isValidClearVariableMonitoringResponseV21,
   isValidGetMonitoringReportResponseV21,
   isValidNotifyMonitoringReportRequestV21,
   isValidSetMonitoringLevelResponseV21,
   isValidSetVariableMonitoringResponseV21,
-} from "@ocpp-cp-simulator/ocpp/v21/index";
+} from "@ocpp-cp-simulator/ocpp/v21";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
 import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";

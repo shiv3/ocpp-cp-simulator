@@ -40,7 +40,7 @@ import type {
   TriggerMessageRequestV16,
   UnlockConnectorRequestV16,
   UpdateFirmwareRequestV16,
-} from "@ocpp-cp-simulator/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp";
 
 type CoreOcppMessagePayloadCall =
   | ChangeAvailabilityRequestV16

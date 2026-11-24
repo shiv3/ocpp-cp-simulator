@@ -12,9 +12,9 @@ import {
   CRITICAL_SECURITY_EVENT_TYPES,
   isCriticalSecurityEvent,
 } from "../../../domain/security/securityEvents";
-import { strictValidationErrors } from "@ocpp-cp-simulator/ocpp/validate";
-import { v201Schemas } from "@ocpp-cp-simulator/ocpp/v201/schemas";
-import { v21Schemas } from "@ocpp-cp-simulator/ocpp/v21/schemas";
+import { strictValidationErrors } from "@ocpp-cp-simulator/ocpp/validation";
+import { v201Schemas } from "@ocpp-cp-simulator/ocpp/v201";
+import { v21Schemas } from "@ocpp-cp-simulator/ocpp/v21";
 import { StationTopology } from "../../../domain/topology/StationTopology";
 
 /**

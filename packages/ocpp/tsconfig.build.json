@@ -1,0 +1,21 @@
+{
+  // Emit for the published package (scripts/build-ocpp-package.ts, #1053):
+  // ESM JavaScript plus declarations into dist/.tsc, which the build script
+  // rearranges into dist/lib. The workspace project (tsconfig.json) only
+  // type-checks.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "incremental": false,
+    "declaration": true,
+    "emitDeclarationOnly": false,
+    "allowImportingTsExtensions": false,
+    "rootDir": ".",
+    "outDir": "dist/.tsc",
+    // validate.ts uses the WHATWG URL global (Node, Bun and browsers have it);
+    // no runtime-specific type package.
+    "lib": ["ES2022", "DOM"],
+    "types": []
+  },
+  "include": ["src"]
+}

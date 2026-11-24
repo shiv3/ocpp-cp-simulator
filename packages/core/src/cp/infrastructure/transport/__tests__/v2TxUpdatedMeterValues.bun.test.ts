@@ -2,12 +2,12 @@ import { describe, expect, it } from "bun:test";
 import {
   isValidMeterValuesRequestV201,
   isValidTransactionEventRequestV201,
-} from "@ocpp-cp-simulator/ocpp/v201/index";
+} from "@ocpp-cp-simulator/ocpp/v201";
 import {
   isValidMeterValuesRequestV21,
   isValidTransactionEventRequestV21,
-} from "@ocpp-cp-simulator/ocpp/v21/index";
-import type { TransactionEventRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/v21";
+import type { TransactionEventRequestV201 } from "@ocpp-cp-simulator/ocpp";
 import type { MockCsms, OcppFrame } from "./mockCsms";
 import { startMockCsms } from "./mockCsms";
 import {

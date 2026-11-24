@@ -3,7 +3,7 @@ import { OCPPMessageHandlerV201 } from "../OCPPMessageHandlerV201";
 import type { OCPPWebSocket } from "../OCPPWebSocket";
 import type { Logger } from "../../../shared/Logger";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
-import type { MeterValuesRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
+import type { MeterValuesRequestV201 } from "@ocpp-cp-simulator/ocpp";
 import { stubOperatingPoint } from "../../../domain/connector/__tests__/operatingPointStub";
 import { StationTopology } from "../../../domain/topology/StationTopology";
 

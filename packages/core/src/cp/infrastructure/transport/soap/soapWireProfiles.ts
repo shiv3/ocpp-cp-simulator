@@ -3,7 +3,7 @@
  * The SOAP body emits elements in object-key order, so each builder writes
  * its keys in the version's XSD sequence.
  */
-import type { StartTransactionRequestV16 } from "@ocpp-cp-simulator/ocpp/index";
+import type { StartTransactionRequestV16 } from "@ocpp-cp-simulator/ocpp";
 import type { SampledValue } from "../../../domain/connector/MeterValueBuilder";
 import type { Transaction } from "../../../domain/connector/Transaction";
 import type {

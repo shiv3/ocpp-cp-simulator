@@ -3,7 +3,7 @@ import type {
   MeterValuesRequestV16,
   StopTransactionRequestV16,
   TransactionEventRequestV201,
-} from "@ocpp-cp-simulator/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
 import {
   answerEverythingElse,

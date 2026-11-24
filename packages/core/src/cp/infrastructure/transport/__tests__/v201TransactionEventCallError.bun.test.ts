@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { TransactionEventRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
+import type { TransactionEventRequestV201 } from "@ocpp-cp-simulator/ocpp";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { ChargePointEvents } from "../../../domain/charge-point/ChargePointEvents";
 import { OCPPStatus } from "../../../domain/types/OcppTypes";

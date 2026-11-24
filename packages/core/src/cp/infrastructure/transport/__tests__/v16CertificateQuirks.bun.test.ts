@@ -5,7 +5,7 @@ import * as x509 from "@peculiar/x509";
 import type {
   CertificateSignedRequestV16,
   GetConfigurationRequestV16,
-} from "@ocpp-cp-simulator/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp";
 import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { startMockCsms } from "./mockCsms";

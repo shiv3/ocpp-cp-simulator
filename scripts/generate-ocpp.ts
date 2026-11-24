@@ -711,7 +711,7 @@ export * from "./v21/index.js";`,
 async function writeCompatibilityModules(): Promise<void> {
   await writeGenerated(
     join(outputDir, "validation", "index.ts"),
-    `${generatedHeader}export { validateOCPPPayload, validationErrors, strictValidationErrors } from "../validate.js";
+    `${generatedHeader}export * from "../validate.js";
 export * from "./v16/index.js";
 export * from "./v201/index.js";
 export * from "./v21/index.js";`,

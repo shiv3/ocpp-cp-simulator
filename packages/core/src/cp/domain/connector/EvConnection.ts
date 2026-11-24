@@ -1,3 +1,5 @@
+import type { TransactionChargingState } from "./Transaction";
+
 /**
  * The physical EV and cable side of a connector (#453).
  *
@@ -27,4 +29,25 @@ export function evConnectionOf(
 ): EvConnectionState {
   if (!cableConnected) return "disconnected";
   return ready ? "connected-ready" : "connected-not-ready";
+}
+
+/**
+ * The 2.x `chargingState` a transaction starting now reports in its Started
+ * event (E02.FR.13: a Started event always carries one). No cable is `Idle`
+ * ("no connection between EV and EVSE", ChargingStateEnumType): an idToken-
+ * first start (E03) reports `EVConnected` at the plug-in that follows (#846).
+ * An EV that does not ask for energy is `SuspendedEV` from the start, never
+ * `Charging` first (1.6 §4.9 B4, #871).
+ */
+export function startChargingStateOf(
+  state: EvConnectionState,
+): TransactionChargingState {
+  switch (state) {
+    case "disconnected":
+      return "Idle";
+    case "connected-not-ready":
+      return "SuspendedEV";
+    case "connected-ready":
+      return "Charging";
+  }
 }

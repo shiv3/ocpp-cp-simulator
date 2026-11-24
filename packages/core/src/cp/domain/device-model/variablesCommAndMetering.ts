@@ -172,6 +172,7 @@ export const COMM_AND_METERING_VARIABLES: readonly DeviceModelVariableDef[] = [
     dataType: "integer",
     min: 0,
     max: Math.floor(MAX_TIMER_MS / 1000),
+    unit: "s",
     default: 0,
     effect:
       "Seconds between the periodic samples TransactionEvent(Ended) carries.",
@@ -193,6 +194,7 @@ export const COMM_AND_METERING_VARIABLES: readonly DeviceModelVariableDef[] = [
       dataType: "integer",
       min: 0,
       max: Math.floor(MAX_TIMER_MS / 1000),
+      unit: "s",
       default: 0,
       effect: "The clock-aligned grid of the TransactionEvent(Ended) history.",
     },

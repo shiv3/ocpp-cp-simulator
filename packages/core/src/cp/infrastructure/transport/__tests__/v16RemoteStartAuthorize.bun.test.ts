@@ -64,12 +64,13 @@ async function csmsCall(
 async function withStation(
   id: string,
   run: (csms: MockCsms, cp: ChargePoint) => Promise<void>,
+  { authorizeRemoteTxRequests = true, connectors = 1 } = {},
 ): Promise<void> {
   const csms = startMockCsms();
   const cp = createChargePoint(
     id,
     DefaultBootNotification,
-    1,
+    connectors,
     csms.url,
     null,
     null,
@@ -89,11 +90,13 @@ async function withStation(
       interval: 300,
     });
     await replyStatusNotification(csms, 0, "Available");
-    await replyStatusNotification(csms, 1, "Available");
+    for (let connector = 1; connector <= connectors; connector++) {
+      await replyStatusNotification(csms, connector, "Available");
+    }
     expect(
       await csmsCall(csms, "cc-1", "ChangeConfiguration", {
         key: "AuthorizeRemoteTxRequests",
-        value: "true",
+        value: String(authorizeRemoteTxRequests),
       }),
     ).toEqual({ status: "Accepted" });
     await run(csms, cp);
@@ -178,5 +181,164 @@ describe("OCPP 1.6 remote start with AuthorizeRemoteTxRequests (#921, §5.11)", 
       await csms.waitForCall("Authorize");
       expect(await outcome).toBe("Unknown");
     });
+  }, 5000);
+});
+
+/**
+ * #839: 1.6 §5.13 — a reservation holding a parent idTag admits the idTags
+ * under that parent. When the station knows no parent for the incoming idTag
+ * (not in the Local Authorization List nor the Authorization Cache), it "SHALL
+ * send an Authorize.req for the incoming idTag", so a RemoteStartTransaction
+ * of such a child is Accepted (errata 3.32: "will attempt to start") and
+ * starts only once the Authorize.conf names the reservation's parent.
+ */
+describe("OCPP 1.6 remote start of a child idTag on a parent's reservation (#839, §5.13)", () => {
+  async function reserveForParent(csms: MockCsms): Promise<void> {
+    expect(
+      await csmsCall(csms, "rn-1", "ReserveNow", {
+        connectorId: 1,
+        expiryDate: new Date(Date.now() + 3_600_000).toISOString(),
+        idTag: "OWNER-839",
+        parentIdTag: "PARENT-839",
+        reservationId: 839,
+      }),
+    ).toEqual({ status: "Accepted" });
+    await replyStatusNotification(csms, 1, "Reserved");
+  }
+
+  const childStart = (csms: MockCsms, connectorId?: number) =>
+    csmsCall(csms, "rst-839", "RemoteStartTransaction", {
+      ...(connectorId !== undefined ? { connectorId } : {}),
+      idTag: "CHILD-839",
+    });
+
+  it.each([
+    ["on the reserved connector", 1],
+    ["without a connector", undefined],
+  ])(
+    "%s: accepts, sends Authorize.req and starts on the parent's reservation",
+    async (_label, connectorId) => {
+      await withStation(
+        `CP016-839-CHILD-${connectorId ?? "ANY"}`,
+        async (csms) => {
+          await reserveForParent(csms);
+          expect(await childStart(csms, connectorId)).toEqual({
+            status: "Accepted",
+          });
+          const auth = await csms.waitForCall("Authorize");
+          expect(auth.payload).toEqual({ idTag: "CHILD-839" });
+          csms.replyCallResult(auth.messageId, {
+            idTagInfo: { status: "Accepted", parentIdTag: "PARENT-839" },
+          });
+          await replyStatusNotification(csms, 1, "Preparing");
+          const start = await csms.waitForCall("StartTransaction");
+          expect(start.payload).toMatchObject({
+            connectorId: 1,
+            idTag: "CHILD-839",
+            reservationId: 839,
+          });
+        },
+        { authorizeRemoteTxRequests: false },
+      );
+    },
+    5000,
+  );
+
+  it("does not start when the Authorize.conf names another parent", async () => {
+    await withStation(
+      "CP016-839-OTHER-PARENT",
+      async (csms, cp) => {
+        await reserveForParent(csms);
+        expect(await childStart(csms, 1)).toEqual({ status: "Accepted" });
+        const auth = await csms.waitForCall("Authorize");
+        csms.replyCallResult(auth.messageId, {
+          idTagInfo: { status: "Accepted", parentIdTag: "OTHER-839" },
+        });
+        await expectNoFrame(csms, isStartTransaction);
+        expect(cp.getConnector(1)?.transaction).toBeNull();
+        expect(cp.reservationManager.getReservation(839)).toBeDefined();
+        // The parent is known now and does not match: Rejected at once,
+        // without another Authorize.req.
+        expect(
+          await csmsCall(csms, "rst-839-again", "RemoteStartTransaction", {
+            connectorId: 1,
+            idTag: "CHILD-839",
+          }),
+        ).toEqual({ status: "Rejected" });
+        await expectNoFrame(
+          csms,
+          (f) => f[0] === 2 && f[2] === "Authorize" && f[1] !== auth.messageId,
+        );
+      },
+      { authorizeRemoteTxRequests: false },
+    );
+  }, 5000);
+
+  it("with AuthorizeRemoteTxRequests, sends a single Authorize.req", async () => {
+    await withStation("CP016-839-ONE-AUTHORIZE", async (csms) => {
+      await reserveForParent(csms);
+      expect(await childStart(csms, 1)).toEqual({ status: "Accepted" });
+      const auth = await csms.waitForCall("Authorize");
+      csms.replyCallResult(auth.messageId, {
+        idTagInfo: { status: "Accepted", parentIdTag: "PARENT-839" },
+      });
+      await replyStatusNotification(csms, 1, "Preparing");
+      await csms.waitForCall("StartTransaction");
+      expect(
+        csms.received.filter((f) => f[0] === 2 && f[2] === "Authorize"),
+      ).toHaveLength(1);
+    });
+  }, 5000);
+
+  it.each([false, true])(
+    "on a connector a scenario is parked on (AuthorizeRemoteTxRequests %p), learns the parent before handing the request over",
+    async (authorizeRemoteTxRequests) => {
+      await withStation(
+        `CP016-839-SCENARIO-${authorizeRemoteTxRequests}`,
+        async (csms, cp) => {
+          await reserveForParent(csms);
+          const got: string[] = [];
+          cp.events.on("remoteStartReceived", (d) => got.push(d.tagId));
+          cp.registerScenarioHandler(1);
+          expect(await childStart(csms, 1)).toEqual({ status: "Accepted" });
+          const auth = await csms.waitForCall("Authorize");
+          expect(got).toEqual([]);
+          csms.replyCallResult(auth.messageId, {
+            idTagInfo: { status: "Accepted", parentIdTag: "PARENT-839" },
+          });
+          for (let i = 0; i < 50 && got.length === 0; i++) {
+            await new Promise((resolve) => setTimeout(resolve, 10));
+          }
+          expect(got).toEqual(["CHILD-839"]);
+          expect(cp.knownParentIdOf("CHILD-839")).toBe("PARENT-839");
+          expect(
+            csms.received.filter((f) => f[0] === 2 && f[2] === "Authorize"),
+          ).toHaveLength(1);
+        },
+        { authorizeRemoteTxRequests },
+      );
+    },
+    5000,
+  );
+
+  it("without a connector, prefers a free connector to the parent's reservation", async () => {
+    await withStation(
+      "CP016-839-FREE-FIRST",
+      async (csms, cp) => {
+        await reserveForParent(csms);
+        expect(await childStart(csms)).toEqual({ status: "Accepted" });
+        await replyStatusNotification(csms, 2, "Preparing");
+        const start = await csms.waitForCall("StartTransaction");
+        expect(start.payload).toMatchObject({
+          connectorId: 2,
+          idTag: "CHILD-839",
+        });
+        expect(
+          csms.received.some((f) => f[0] === 2 && f[2] === "Authorize"),
+        ).toBe(false);
+        expect(cp.reservationManager.getReservation(839)).toBeDefined();
+      },
+      { authorizeRemoteTxRequests: false, connectors: 2 },
+    );
   }, 5000);
 });

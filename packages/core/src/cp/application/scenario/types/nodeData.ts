@@ -163,12 +163,17 @@ export interface RemoteStartDetails {
   remoteStartId?: number;
   /** The CSMS's `idToken.type` of a 2.x RequestStartTransaction (#599). */
   idTokenType?: IdTokenTypeName;
+  /** The `groupIdToken` of a 2.x RequestStartTransaction (#839). */
+  groupIdToken?: string;
 }
 
 export interface StartTransactionOptions {
   triggerReason?: TransactionStartTriggerReason;
   remoteStartId?: number;
   idTokenType?: IdTokenTypeName;
+  /** The group of a RequestStartTransaction: the reservation check uses it
+   *  before what the station knows of the token (F01.FR.21/22, #839). */
+  groupIdToken?: string;
 }
 
 export interface StopTransactionOptions {

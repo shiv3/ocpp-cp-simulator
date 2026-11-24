@@ -190,11 +190,20 @@ export interface TxEndedSample {
   /** ISO 8601 instant of the sample. */
   timestamp: string;
   sampledValue: SampledValue[];
+  /** What took the sample (#846): kept beside the values because a
+   *  `meter.sampledValues` override may rewrite their context. Stored only,
+   *  never sent; absent on entries persisted before it existed. */
+  kind?: TxEndedSampleKind;
 }
 
-/** Upper bound of {@link Transaction.txEndedSamples}; the oldest entries are
- *  dropped beyond it so a very long session stays bounded in memory and in
- *  the persisted transaction. */
+/** The sample that started the history, a periodic or a clock-aligned one. */
+export type TxEndedSampleKind = "begin" | "periodic" | "clock";
+
+/** Upper bound of {@link Transaction.txEndedSamples}. Reaching it drops every
+ *  other intermediate entry (the 2nd, 4th, …), never the first (the
+ *  `Transaction.Begin` sample) nor the newest, as E06.FR.13 / J02.FR.20 ask,
+ *  so a very long session stays bounded in memory and in the persisted
+ *  transaction. */
 export const TX_ENDED_SAMPLES_MAX = 1000;
 
 export interface Transaction {

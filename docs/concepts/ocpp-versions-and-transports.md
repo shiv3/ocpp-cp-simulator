@@ -754,6 +754,15 @@ the gate while `Pending`. Anything not triggered (transaction messages, status
 changes, heartbeats) stays suppressed, and a `Rejected` station sends nothing
 even when triggered.
 
+Inbound CALLs are gated too (#726). §4.2: "While Rejected, the Charge Point
+SHALL NOT respond to any Central System initiated message", so from a
+`Rejected` answer until the retry interval has passed the station sends no
+CALLRESULT or CALLERROR for a CSMS CALL and runs nothing (a `Reset` does not
+reboot). The CALL is announced, logged (`Boot Rejected (§4.2): ignored …`) and
+shown on the timeline as unanswered. When the retry BootNotification is due the
+station answers again. Pending and Accepted answer as usual. There is no
+opt-out.
+
 Known gap (#839): while the boot is `Pending` or `Rejected` a MeterValues.req is
 dropped, not queued (§3.7 asks for transaction-related messages to be queued),
 so a restored transaction loses one sample per interval until the boot is
@@ -766,22 +775,6 @@ logged, and a write to `AuthorizationKey` / `SecurityProfile` does not
 reconnect or apply the A05.FR.08 fallback. Chosen over `bypassGuard: true`
 (#839) because a scenario that skips the guard could leave the station with
 credentials it cannot connect with.
-
-## OCPP-J 1.6 boot gate (§4.2)
-
-Outgoing CALLs follow the status of the last `BootNotification.conf`
-(`BootGate`): `Accepted` lets everything out; before the first answer and while
-`Pending` only `BootNotification` goes out, and while `Rejected` nothing does
-until the retry interval has passed.
-
-Inbound CALLs are gated too (#726). §4.2: "While Rejected, the Charge Point
-SHALL NOT respond to any Central System initiated message", so from a
-`Rejected` answer until the retry interval has passed the station sends no
-CALLRESULT or CALLERROR for a CSMS CALL and runs nothing (a `Reset` does not
-reboot). The CALL is announced, logged (`Boot Rejected (§4.2): ignored …`) and
-shown on the timeline as unanswered. When the retry BootNotification is due the
-station answers again. Pending and Accepted answer as usual. There is no
-opt-out.
 
 ## OCPP 2.x Reset OnIdle
 
@@ -887,7 +880,11 @@ Instead the station resumes what an accepted boot starts (B04, E11):
   station scope is never reported on 2.x
   ([connectors only](#ocpp-2x-statusnotification-reports-connectors-only)).
 - **Reservations** survive the loss with their expiry (a link loss is not a
-  reboot, and B01.FR.13 even keeps `Reserved` across a reboot). A `Reset` still
+  reboot, and B01.FR.13 even keeps `Reserved` across a reboot). One whose
+  expiry passed during the outage ends at the resume through the expiry path:
+  the connector is reported `Available` with the status reports, then
+  `ReservationStatusUpdate(Expired)` goes out (H04.FR.01, steps 4-6, #839).
+  A `Reset` still
   drops them, as before: persisting a reservation across a reboot is not
   modeled. Station-level charging profiles (connectorId 0) are cleared by the
   teardown (`ConnectionClosed`) but restored by the resume, minus those whose
@@ -1088,11 +1085,21 @@ one operating point per sample, so a sample describes one instant (#327).
   the last periodic sample when the stop falls on a tick instead of reading 0
   from a connector already in `Finishing`.
 - **The history is kept as formatted samples** on the transaction
-  (`txEndedSamples`, at most 1,000, oldest dropped), persisted with the
-  transaction (`transaction_json`, no schema change). A later change of a
-  measurand list cannot reformat what was already taken.
+  (`txEndedSamples`), persisted with the transaction (`transaction_json`, no
+  schema change). A later change of a measurand list cannot reformat what was
+  already taken. Each entry also stores what took it (begin, periodic or
+  clock, never sent), so the `TxEndedInterval` spacing holds when a
+  `meter.sampledValues` override rewrites a value's `context` (#846).
+- **At 1,000 entries, every other intermediate entry is dropped** (the 2nd,
+  4th, …), never the first (the `Transaction.Begin` sample) nor the newest:
+  the history keeps its whole span at half the density (E06.FR.13,
+  J02.FR.20; #846).
+- **1.6 reads the two lists when `StopTransaction` is sent**: with both
+  `StopTxnSampledData` and `StopTxnAlignedData` emptied during the
+  transaction, the history taken before stays out of `transactionData`
+  (§3.16.5; #846). Signed OCMF entries are not affected.
 - Not covered: SOAP (1.2 / 1.5 / 1.6S) keeps its `StopTransaction` without
-  `transactionData` samples.
+  `transactionData` samples, and records no history (#846).
 
 ## Signed meter values (OCMF, #315)
 

@@ -1,4 +1,5 @@
 import { stationNow } from "../stationNow";
+import { resumeAfterEvseSuspension } from "../../../domain/charge-point/resumeAfterEvseSuspension";
 import type {
   ClearChargingProfileRequestV201,
   ClearChargingProfileResponseV201,
@@ -275,7 +276,7 @@ function applyProfileStatusV201(
       connector.status === OCPPStatus.SuspendedEVSE &&
       !connector.energyHeld
     ) {
-      ctx.chargePoint.updateConnectorStatus(connector.id, OCPPStatus.Charging);
+      resumeAfterEvseSuspension(ctx.chargePoint, connector);
     }
   }
 }

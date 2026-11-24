@@ -1,6 +1,9 @@
 import { OCPPStatus } from "../../../cp/domain/types/OcppTypes";
+import { VirtualClock } from "../../../cp/shared/clock";
 import type { GoldenCase } from "./helpers";
 import { both, c16, c201, settle } from "./helpers";
+
+const bootRejectedClock = new VirtualClock();
 
 export const bootCases: GoldenCase[] = [
   // --- boot and status --------------------------------------------------
@@ -90,23 +93,25 @@ export const bootCases: GoldenCase[] = [
   ),
   // OCPP 1.6 section 4.2: while Rejected the station answers nothing the CSMS
   // sends and a Reset has no effect; it answers again once the retry
-  // BootNotification has been Accepted.
+  // BootNotification has been Accepted. On a VirtualClock (#871): both CALLs
+  // land while Rejected whatever the machine's load, and the retry is due
+  // when the clock passes the 1 s interval, not after a real second.
   c16(
     "boot-rejected-silent-then-retry",
     async (rig) => {
       await settle(rig);
       rig.csms.callNoWait("GetConfiguration", { key: ["HeartbeatInterval"] });
       rig.csms.callNoWait("Reset", { type: "Soft" });
-      await new Promise((r) => setTimeout(r, 300));
-      await rig.csms.waitForCall("BootNotification", {
-        nth: 2,
-        timeoutMs: 30_000,
-      });
+      await settle(rig);
+      await bootRejectedClock.advanceBy(1000);
+      await rig.csms.waitForCall("BootNotification", { nth: 2 });
       await settle(rig);
       await rig.csms.call("GetConfiguration", { key: ["HeartbeatInterval"] });
       await settle(rig);
     },
     {
+      memory: true,
+      simulation: { clock: bootRejectedClock, seed: "g867" },
       responders: {
         BootNotification: (_p, { nth }) => ({
           result: {

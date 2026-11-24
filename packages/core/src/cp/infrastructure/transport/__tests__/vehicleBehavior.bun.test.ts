@@ -1,6 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import type { TransactionEventRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
-import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
+import {
+  answerTo,
+  startMockCsms,
+  type MockCsms,
+  type OcppFrame,
+} from "./mockCsms";
 import {
   answerEverythingElse,
   bootedChargePoint,
@@ -178,6 +183,82 @@ describe("vehicle behavior on OCPP 2.0.1 (#835)", () => {
       csms.stop();
     }
   }, 15000);
+
+  const eventOf =
+    (eventType: string, triggerReason: string) => (f: OcppFrame) =>
+      callOf("TransactionEvent")(f) &&
+      (f[3] as TransactionEventRequestV201).eventType === eventType &&
+      (f[3] as TransactionEventRequestV201).triggerReason === triggerReason;
+
+  async function stopWhenDoneV201(id: string, txStopPoint?: string) {
+    const csms = startMockCsms();
+    const cp = await bootedChargePoint(csms, id, "OCPP-2.0.1");
+    cp.configuration.applyChange("AuthorizeBeforeLocalStart", "false");
+    if (txStopPoint) cp.configuration.applyChange("TxStopPoint", txStopPoint);
+    const stop = answerEverythingElse(csms, []);
+    const connector = cp.getConnector(1)!;
+    connector.applyEvSettingsOverride({
+      vehicleBehavior: {
+        preset: "target-soc",
+        intent: { targetSoc: 60 },
+        stopWhenDone: true,
+      },
+    });
+    cp.evPlugIn(1);
+    await cp.startTransaction("TAG-VB-STOP", 1);
+    cp.updateConnectorStatus(1, OCPPStatus.Charging);
+    connector.soc = 70;
+    return { csms, cp, stop, connector };
+  }
+
+  // E15.FR.04: a stop the EV asks for is an Ended event with triggerReason
+  // StopAuthorized and stoppedReason StoppedByEV (#871).
+  it("stopWhenDone ends the transaction with StopAuthorized / StoppedByEV", async () => {
+    const { csms, cp, stop } = await stopWhenDoneV201("CP201-VB-STOP");
+    try {
+      const ended = await csms.waitForFrame(
+        (f) =>
+          callOf("TransactionEvent")(f) &&
+          (f[3] as TransactionEventRequestV201).eventType === "Ended",
+        6000,
+      );
+      const request = ended[3] as TransactionEventRequestV201;
+      expect(request.triggerReason).toBe("StopAuthorized");
+      expect(request.transactionInfo.stoppedReason).toBe("StoppedByEV");
+    } finally {
+      stop();
+      cp.dispose();
+      csms.stop();
+    }
+  }, 15000);
+
+  // E15.FR.05: with a TxStopPoint lacking Authorized, the EV's stop ends the
+  // authorization only: one Updated StopAuthorized, the transaction stays.
+  it("stopWhenDone under TxStopPoint EVConnected sends one Updated StopAuthorized", async () => {
+    const { csms, cp, stop, connector } = await stopWhenDoneV201(
+      "CP201-VB-STOP-EVC",
+      "EVConnected",
+    );
+    try {
+      await csms.waitForFrame(eventOf("Updated", "StopAuthorized"), 6000);
+      // The vehicle keeps asking on every tick; nothing more goes out.
+      await new Promise((r) => setTimeout(r, 2500));
+      const updates = callsOf(csms, "TransactionEvent").filter(
+        eventOf("Updated", "StopAuthorized"),
+      );
+      expect(updates).toHaveLength(1);
+      expect(
+        callsOf(csms, "TransactionEvent").filter(
+          (f) => (f[3] as TransactionEventRequestV201).eventType === "Ended",
+        ),
+      ).toHaveLength(0);
+      expect(connector.hasRunningTransaction).toBe(true);
+    } finally {
+      stop();
+      cp.dispose();
+      csms.stop();
+    }
+  }, 15000);
 });
 
 describe("power sharing on a station (#608)", () => {
@@ -267,6 +348,83 @@ describe("power sharing on a station (#608)", () => {
       csms.stop();
     }
   });
+
+  it("a ChangeConfiguration CALL on the current limit key moves Power.Offered on the wire", async () => {
+    const csms = startMockCsms();
+    const cp = await bootedChargePoint(csms, "CP16-PS-KEY-WIRE", "OCPP-1.6J", {
+      connectors: 2,
+      chargerCapabilities: {
+        connectors: [
+          { connectorId: 1, maxDeliveryPowerW: 22_000 },
+          { connectorId: 2, maxDeliveryPowerW: 22_000 },
+        ],
+        powerSharing: {
+          strategy: "equal",
+          currentLimit: {
+            key: "VendorStationMaxCurrent",
+            valueA: 32,
+            phases: 3,
+          },
+        },
+      },
+    });
+    cp.configuration.applyChange("AuthorizeBeforeLocalStart", "false");
+    cp.configuration.applyChange("MeterValuesSampledData", "Power.Offered");
+    const stop = answerEverythingElse(csms, ["StartTransaction"]);
+    const call = async (id: string, action: string, payload: unknown) => {
+      csms.send([2, id, action, payload]);
+      return (await csms.waitForFrame(answerTo(id)))[2];
+    };
+    const offeredW = async (id: string) => {
+      const before = csms.received.length - 1;
+      expect(
+        await call(id, "TriggerMessage", {
+          requestedMessage: "MeterValues",
+          connectorId: 1,
+        }),
+      ).toEqual({ status: "Accepted" });
+      const frame = await csms.waitForFrame(
+        (f) =>
+          callOf("MeterValues")(f) &&
+          csms.received.indexOf(f) > before &&
+          (f[3] as { connectorId: number }).connectorId === 1,
+      );
+      const { meterValue } = frame[3] as {
+        meterValue: {
+          sampledValue: { measurand?: string; value: string }[];
+        }[];
+      };
+      const sample = meterValue[0].sampledValue.find(
+        (s) => s.measurand === "Power.Offered",
+      );
+      return Number(sample?.value);
+    };
+    try {
+      cp.getConnector(1)!.applyEvSettingsOverride({ maxChargingPowerKw: 100 });
+      await startV16(cp, csms, 1, 6084);
+      await csms.waitForFrame(statusOf("Charging"));
+      expect(await offeredW("mv-32a")).toBe((32 * 230 * 3) / 2);
+      expect(
+        await call("cc-16a", "ChangeConfiguration", {
+          key: "VendorStationMaxCurrent",
+          value: "16",
+        }),
+      ).toEqual({ status: "Accepted" });
+      expect(await offeredW("mv-16a")).toBe((16 * 230 * 3) / 2);
+      // Outside the key's bounds: refused, and the budget stays put.
+      expect(
+        await call("cc-0a", "ChangeConfiguration", {
+          key: "VendorStationMaxCurrent",
+          value: "0",
+        }),
+      ).toEqual({ status: "Rejected" });
+      expect(await offeredW("mv-0a")).toBe((16 * 230 * 3) / 2);
+    } finally {
+      stop();
+      cp.dispose();
+      csms.stop();
+    }
+  }, 15000);
 
   it("DC efficiency shows on the main meter's AC input, not on the connector", async () => {
     const csms = startMockCsms();

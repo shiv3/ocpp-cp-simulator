@@ -1,15 +1,13 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "@/i18n";
 import InlineConfirm from "../../../console/components/InlineConfirm";
 import type { IndexMapping } from "./scenarioValue";
 import { appendItem, moveItem, removeItem } from "./scenarioValue";
 import type { LaneTarget, NodeFormContext } from "./types";
 
 /** How a lane's target reads: a step, the end, or "no step yet". */
-export function laneText(
-  t: ReturnType<typeof useTranslation>["t"],
-  target: LaneTarget | null,
-): string {
+export function laneText(t: TFunction, target: LaneTarget | null): string {
   if (!target) return t("scenarioEditor.lane.none");
   return target.kind === "end"
     ? t("scenarios.editor.endOfScenario")

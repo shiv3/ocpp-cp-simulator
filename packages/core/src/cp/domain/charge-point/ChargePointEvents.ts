@@ -175,6 +175,8 @@ export interface ChargePointEvents {
     remoteStartId?: number;
     /** 2.x: the `idToken.type` the CSMS sent (#599). */
     idTokenType?: IdTokenTypeName;
+    /** 2.x: the request's `groupIdToken.idToken` (F01.FR.21/22, #839). */
+    groupIdToken?: string;
   };
   /** Emitted when CSMS sends RemoteStopTransaction.req while a scenario
    *  has registered as the stop-side handler for this connector. The

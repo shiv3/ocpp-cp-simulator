@@ -16,7 +16,7 @@ related:
   - ../concepts/scenario-format.md
   - ../entities/default-behaviors.md
   - ../entities/cli.md
-updated: 2026-11-09
+updated: 2026-11-15
 ---
 
 # Scenario or behavior?
@@ -211,7 +211,9 @@ bun scripts/record-behavior.ts default.firmware --action UpdateFirmware \
 `<behavior>` is a built-in `default.*` id or the path of a behavior module. The run uses a real station, the seeded
 streams and the fake CSMS of the behavior tests (`recordBehavior()` in
 `packages/core/src/test/behavior/recordBehavior.ts`), so it takes no real time and the same seed records the same
-file. What the station put on the wire after the CALL, and when, becomes nodes:
+file. `--version` is the wire version (`1.6`, `2.0.1` or `2.1`, default `1.6`); `--horizon` (default 600 000) and
+`--step` (default 250) are positive milliseconds. Any other value exits with code 2 before the run. What the station
+put on the wire after the CALL, and when, becomes nodes:
 
 | Effect of the run                                           | Node                                                                                                  |
 | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
@@ -225,7 +227,7 @@ file. What the station put on the wire after the CALL, and when, becomes nodes:
 scenario holds the CALL until `callResponse`) and is reported on stderr as `not recorded`, never invented.
 
 The output carries `recordedFrom: { behaviorId, commit, seed, version }` (schema 1.6, informational: the runtime
-ignores it), so a recording is never mistaken for the default it came from. The diagram is Mermaid source, for
+ignores it; `commit` is `APP_COMMIT`, else the git commit, else the version label), so a recording is never mistaken for the default it came from. The diagram is Mermaid source, for
 example the recording above (OCPP 1.6 §4.5 UpdateFirmware, §6.19 FirmwareStatusNotification):
 
 ```mermaid

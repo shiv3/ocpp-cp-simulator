@@ -204,6 +204,42 @@ describe("EV-side disconnect on OCPP 1.6 (#488)", () => {
     }
   });
 
+  it("re-plugging the cable resumes Charging (§4.10, energy transfer is allowed again)", async () => {
+    const csms = startMockCsms();
+    const { cp, stopAnswering } = await v16ChargingStation(
+      csms,
+      "CP16-EVSD-REPLUG",
+      false,
+    );
+    try {
+      await startV16Transaction(cp, csms);
+      cp.evDisconnected(1);
+      await csms.waitForFrame(statusOf("SuspendedEV"));
+      await sentinel(cp, csms);
+      const before = csms.received.length - 1;
+
+      cp.evPlugIn(1);
+
+      await csms.waitForFrame(
+        (frame) =>
+          statusOf("Charging")(frame) && indexAfter(csms, before)(frame),
+      );
+      await sentinel(cp, csms);
+      const after = csms.received.slice(before + 1);
+      expect(after.filter(callOf("StatusNotification"))).toHaveLength(1);
+      expect(callsOf(csms, "StopTransaction")).toHaveLength(0);
+      const connector = cp.getConnector(1);
+      expect(connector?.evConnection).toBe("connected-ready");
+      expect(connector?.transaction?.id).toBe(4880);
+      expect(connector?.status).toBe(OCPPStatus.Charging);
+      expect(connector?.energyOfferSuspended).toBe(false);
+    } finally {
+      stopAnswering();
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
   for (const key of [true, false]) {
     it(`without a transaction (key=${key}) the unplug reports Available`, async () => {
       const csms = startMockCsms();
@@ -343,6 +379,60 @@ describe("EV-side disconnect on OCPP 2.0.1 (#488)", () => {
       expect(after.filter(callOf("StatusNotification"))).toHaveLength(0);
       expect(after.filter(callOf("TransactionEvent"))).toHaveLength(0);
       expect(cp.getConnector(1)?.status).toBe(OCPPStatus.SuspendedEV);
+    } finally {
+      stopAnswering();
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  it("re-plugging the cable sends CablePluggedIn and resumes Charging (E10)", async () => {
+    const csms = startMockCsms();
+    const { cp, stopAnswering } = await v201ChargingStation(
+      csms,
+      "CP201-EVSD-REPLUG",
+      false,
+    );
+    try {
+      await startV201Transaction(cp, csms);
+      cp.evDisconnected(1);
+      await csms.waitForFrame(
+        (frame) =>
+          callOf("TransactionEvent")(frame) &&
+          (frame[3] as TransactionEventRequestV201).triggerReason ===
+            "EVCommunicationLost",
+      );
+      await sentinel(cp, csms);
+      const before = csms.received.length - 1;
+
+      cp.evPlugIn(1);
+
+      await csms.waitForFrame(
+        (frame) =>
+          callOf("TransactionEvent")(frame) &&
+          indexAfter(csms, before)(frame) &&
+          (frame[3] as TransactionEventRequestV201).transactionInfo
+            .chargingState === "Charging",
+      );
+      await sentinel(cp, csms);
+      const events = csms.received
+        .slice(before + 1)
+        .filter(callOf("TransactionEvent"))
+        .map((frame) => frame[3] as TransactionEventRequestV201);
+      expect(
+        events.map((e) => [
+          e.eventType,
+          e.triggerReason,
+          e.transactionInfo.chargingState,
+        ]),
+      ).toEqual([
+        ["Updated", "CablePluggedIn", "EVConnected"],
+        ["Updated", "ChargingStateChanged", "Charging"],
+      ]);
+      const connector = cp.getConnector(1);
+      expect(connector?.hasRunningTransaction).toBe(true);
+      expect(connector?.status).toBe(OCPPStatus.Charging);
+      expect(connector?.energyOfferSuspended).toBe(false);
     } finally {
       stopAnswering();
       cp.disconnect();

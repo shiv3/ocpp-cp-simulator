@@ -13,6 +13,7 @@ import {
 } from "../../types/OcppTypes";
 import { buildSampledValues } from "../MeterValueBuilder";
 import type { EVSettings } from "../EVSettings";
+import { powerWattsForCurrent } from "../ChargingCurve";
 import {
   chargerTermOf,
   resolveOperatingPoint,
@@ -511,5 +512,101 @@ describe("the charger cap is one more term of the resolution (#327)", () => {
     connector.markEvUnplugged();
     expect(connector.evConnection).toBe("disconnected");
     expect(connector.operatingPoint().offeredW).toBe(0);
+  });
+});
+
+// #846 / #826: an ampere limit is converted to watts at the nominal voltage.
+// A sagging voltage carries less power through the same amperes; it must not
+// make the reported current, or its bound, exceed the profile's amperes.
+describe("an ampere limit holds under voltage fluctuation (#846)", () => {
+  const settingsOf = (phases: 1 | 3): EVSettings => ({
+    ...new Connector(1, new Logger(LogLevel.ERROR)).evSettings,
+    currentType: "AC",
+    phases,
+    voltageV: 230,
+    powerFactor: 1,
+    maxChargingPowerKw: 50,
+    chargingCurve: undefined,
+  });
+  const ampsInputs = (
+    amps: number,
+    phases: 1 | 3,
+    realism: NonNullable<OperatingPointInputs["meter"]["realism"]>,
+    at: number,
+  ): OperatingPointInputs => {
+    const settings = settingsOf(phases);
+    return bareInputs({
+      at,
+      vehicle: vehicleTermOf(settings),
+      schedule: {
+        scheduleLimitW: powerWattsForCurrent(amps, settings, phases),
+        activePhases: phases,
+      },
+      meter: { realism },
+    });
+  };
+
+  it("bounds Current.Import by the profile amperes and derives the power from it", () => {
+    let sagged = 0;
+    for (let i = 0; i < 200; i++) {
+      const point = resolveOperatingPoint(
+        ampsInputs(
+          32,
+          1,
+          { seed: 3, fluctuation: { voltagePct: 5, currentPct: 2 } },
+          i * 1_000,
+        ),
+      );
+      if (point.voltageV < 230) sagged++;
+      expect(point.limitA).toBeCloseTo(32, 9);
+      expect(point.currentA).toBeLessThanOrEqual(32 + 1e-9);
+      expect(point.acceptedW).toBeLessThanOrEqual(7_360 + 1e-9);
+      // The power is what the bounded current carries at this voltage.
+      expect(point.acceptedW).toBeLessThanOrEqual(point.voltageV * 32 + 1e-6);
+      expect(point.offeredW).toBeLessThanOrEqual(point.voltageV * 32 + 1e-6);
+      expect(point.offeredCurrentA).toBeLessThanOrEqual(32 + 1e-9);
+      // No curve: the register bound is the reported power.
+      expect(point.accumulationCapW).toBeCloseTo(point.acceptedW, 6);
+    }
+    expect(sagged).toBeGreaterThan(50);
+  });
+
+  it("caps each phase current under load imbalance and keeps the phases adding up", () => {
+    let clipped = 0;
+    for (let i = 0; i < 200; i++) {
+      const point = resolveOperatingPoint(
+        ampsInputs(
+          16,
+          3,
+          {
+            seed: 11,
+            fluctuation: { voltagePct: 4 },
+            phases: { loadImbalancePct: 30, voltageImbalancePct: 3 },
+          },
+          i * 1_000,
+        ),
+      );
+      const detail = point.phaseDetail;
+      expect(detail).not.toBeNull();
+      if (!detail) continue;
+      for (const amps of detail.currentA) {
+        expect(amps).toBeLessThanOrEqual(16 + 1e-9);
+      }
+      if (detail.currentA.some((a) => a > 16 - 1e-6)) clipped++;
+      const sum = detail.powerW[0] + detail.powerW[1] + detail.powerW[2];
+      expect(sum).toBeCloseTo(point.acceptedW, 6);
+      detail.powerW.forEach((p, k) =>
+        expect(p).toBeCloseTo(detail.currentA[k] * detail.voltageV[k], 6),
+      );
+    }
+    expect(clipped).toBeGreaterThan(20);
+  });
+
+  it("leaves a point without fluctuation exactly as it was", () => {
+    const point = resolveOperatingPoint(ampsInputs(32, 1, {}, 0));
+    expect(point.acceptedW).toBe(7_360);
+    expect(point.currentA).toBe(32);
+    expect(point.limitA).toBe(32);
+    expect(point.accumulationCapW).toBe(7_360);
   });
 });

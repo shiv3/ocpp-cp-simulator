@@ -7,6 +7,7 @@ import type {
 } from "../../../domain/charge-point/ChargePoint";
 import type { Connector } from "../../../domain/connector/Connector";
 import type { Transaction } from "../../../domain/connector/Transaction";
+import { startChargingStateOf } from "../../../domain/connector/EvConnection";
 import { OCPPStatus } from "../../../domain/types/OcppTypes";
 import { isOcpp2Version } from "../../../domain/types/OcppVersion";
 import type { TransactionPorts } from "../../../domain/engine/ChargePointEngine";
@@ -20,7 +21,7 @@ import { nowDate, startsInProgress } from "./transactionStop";
  * but could still belong to its group: the reservation names a parent idTag /
  * groupIdToken and the station does not know the tag's own (H03.FR.07/08).
  */
-function mayMatchThroughParent(
+export function mayMatchThroughParent(
   cp: ChargePoint,
   connectorId: number,
   tagId: string,
@@ -194,6 +195,8 @@ export async function startTransaction(
     parentOfTag,
   );
   const reservationId = reservation?.reservationId;
+  const evConnection = connector.evConnection;
+  const ocpp2 = isOcpp2Version(cp.ocppVersion);
 
   const transaction: Transaction = {
     id: 0,
@@ -212,7 +215,10 @@ export async function startTransaction(
       ? { idTokenType: options.idTokenType }
       : {}),
     startTriggerReason: options.triggerReason,
-    startChargingState: options.chargingState,
+    // #846: without an explicit state, the cable decides (Idle before it is in).
+    startChargingState:
+      options.chargingState ??
+      (ocpp2 ? startChargingStateOf(evConnection) : undefined),
     ...(options.awaitAuthorization === true
       ? { awaitingAuthorization: true }
       : {}),
@@ -238,7 +244,7 @@ export async function startTransaction(
     cp.reservationManager.cancelReservation(reservation.reservationId);
   }
 
-  const cablePluggedBefore = connector.evConnection !== "disconnected";
+  const cablePluggedBefore = evConnection !== "disconnected";
   connector.beginTransaction(transaction);
   // 2.x idToken-first (E03): a transaction started before the cable is in does
   // not put one there. The plug-in that follows is a cable event of its own
@@ -291,6 +297,15 @@ export async function startTransaction(
         }
       }
     }
+  }
+  // 2.x: the Started event already said SuspendedEV (1.6 waits for the conf).
+  // A state the caller named (#335) is wire only: the EV decides the hold.
+  if (
+    ocpp2 &&
+    evConnection === "connected-not-ready" &&
+    live.startChargingState === "SuspendedEV"
+  ) {
+    holdForNotReadyEv(cp, connector);
   }
 
   cp.events.emit("transactionStarted", {
@@ -356,9 +371,10 @@ async function authorizeAwaitingTransaction(
       ? { remoteStartId: options.remoteStartId }
       : {}),
   });
+  const evNotReady = connector.evConnection === "connected-not-ready";
   cp.sendTransactionUpdate(connector.id, {
     triggerReason: remote ? "RemoteStart" : "Authorized",
-    chargingState: "Charging",
+    chargingState: evNotReady ? "SuspendedEV" : "Charging",
     idToken: {
       tagId,
       ...(options.idTokenType !== undefined
@@ -369,7 +385,8 @@ async function authorizeAwaitingTransaction(
       ? { remoteStartId: options.remoteStartId }
       : {}),
   });
-  if (connector.status === OCPPStatus.Preparing) {
+  if (evNotReady) holdForNotReadyEv(cp, connector);
+  else if (connector.status === OCPPStatus.Preparing) {
     cp.updateConnectorStatus(connector.id, OCPPStatus.Charging);
   }
   cp.events.emit("transactionStarted", {
@@ -378,4 +395,18 @@ async function authorizeAwaitingTransaction(
     tagId,
   });
   return { started: true };
+}
+
+/**
+ * #871: a transaction that starts for an EV not asking for energy goes
+ * straight to `SuspendedEV` (1.6 §4.9 B4: "All prerequisites for charging
+ * are met but EV does not start charging"), never `Charging` first. The
+ * offer is held as `evSetReady(false)` holds it, so that the EV's readiness
+ * resumes `Charging`.
+ */
+function holdForNotReadyEv(cp: ChargePoint, connector: Connector): void {
+  connector.suspendEnergyOffer();
+  if (connector.status !== OCPPStatus.SuspendedEV) {
+    cp.updateConnectorStatus(connector.id, OCPPStatus.SuspendedEV);
+  }
 }

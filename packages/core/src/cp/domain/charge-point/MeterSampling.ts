@@ -11,12 +11,31 @@ import { measurandEnumFor } from "../connector/measurandEnum";
 import {
   TX_ENDED_SAMPLES_MAX,
   type TransactionUpdateOptions,
+  type TxEndedSample,
+  type TxEndedSampleKind,
 } from "../connector/Transaction";
 import type { Outbox } from "../transport/Outbox";
-import { isOcpp2Version } from "../types/OcppVersion";
+import { isOcpp2Version, isSoapVersion } from "../types/OcppVersion";
 import type { ChargePoint } from "./ChargePoint";
 import type { ConfigurationStore } from "./ConfigurationStore";
 import type { MainMeter } from "./MainMeter";
+
+const TX_ENDED_KIND: Record<
+  "Transaction.Begin" | "Sample.Periodic" | "Sample.Clock",
+  TxEndedSampleKind
+> = {
+  "Transaction.Begin": "begin",
+  "Sample.Periodic": "periodic",
+  "Sample.Clock": "clock",
+};
+
+/** E06.FR.13 / J02.FR.20: drop every other intermediate entry (the 2nd,
+ *  4th, …), keeping the first (the `Transaction.Begin` sample) and the
+ *  newest, so the history keeps its whole span at half the density. */
+function thinIntermediates(history: TxEndedSample[]): TxEndedSample[] {
+  const last = history.length - 1;
+  return history.filter((_, i) => i === 0 || i === last || i % 2 === 0);
+}
 
 /** What the meter sampling needs from its charge point. Members read
  *  through functions are assigned after the sampling is constructed. */
@@ -201,6 +220,8 @@ export class MeterSampling {
   ): void {
     const transaction = connector.transaction;
     if (!transaction || !connector.hasRunningTransaction) return;
+    // SOAP's StopTransaction never carries the history (#846): keep none.
+    if (isSoapVersion(this.host.chargePoint.ocppVersion)) return;
     // 2.x: the same MeasurandEnumType filter and unit multiplier as every
     // other sample of the dialect (#714, #826); a name outside the enum is
     // never recorded (B05.FR.07 rejects it in SetVariables, but a persisted
@@ -221,9 +242,15 @@ export class MeterSampling {
     if (sampledValue.length === 0) return;
     const history = transaction.txEndedSamples ?? [];
     const next = [
-      ...history,
-      { timestamp: timestamp.toISOString(), sampledValue },
-    ].slice(-TX_ENDED_SAMPLES_MAX);
+      ...(history.length >= TX_ENDED_SAMPLES_MAX
+        ? thinIntermediates(history)
+        : history),
+      {
+        timestamp: timestamp.toISOString(),
+        sampledValue,
+        kind: TX_ENDED_KIND[context],
+      },
+    ];
     connector.patchTransaction({ txEndedSamples: next });
   }
 
@@ -246,7 +273,11 @@ export class MeterSampling {
       const history = transaction.txEndedSamples ?? [];
       const last = [...history]
         .reverse()
-        .find((e) => e.sampledValue[0]?.context === "Sample.Periodic");
+        .find((e) =>
+          e.kind
+            ? e.kind === "periodic"
+            : e.sampledValue[0]?.context === "Sample.Periodic",
+        );
       const lastMs = last
         ? Date.parse(last.timestamp)
         : transaction.startTime.getTime();

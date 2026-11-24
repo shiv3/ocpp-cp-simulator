@@ -3,6 +3,12 @@ import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
+import { ScenarioExecutor } from "../../../application/scenario/ScenarioExecutor";
+import { createScenarioExecutorCallbacks } from "../../../application/scenario/ScenarioRuntime";
+import type {
+  ScenarioDefinition,
+  ScenarioNode,
+} from "../../../application/scenario/ScenarioTypes";
 
 const VERSIONS = ["OCPP-2.0.1", "OCPP-2.1"] as const;
 
@@ -247,6 +253,88 @@ describe.each(VERSIONS)("%s RequestStartTransaction validation", (version) => {
       );
       expect((started[3] as { evse?: { id: number } }).evse?.id).toBe(2);
     });
+  });
+
+  it("hands the request's groupIdToken to a parked scenario's start on an EVSE reserved for the group (F01.FR.21, FR.22, #839)", async () => {
+    await withStation(
+      version,
+      async (csms, cp, ask) => {
+        csms.send([
+          2,
+          "res-1",
+          "ReserveNow",
+          {
+            id: 5,
+            evseId: 1,
+            expiryDateTime: new Date(Date.now() + 3_600_000).toISOString(),
+            idToken: { idToken: "OWNER", type: "Central" },
+            groupIdToken: { idToken: "GROUP", type: "Central" },
+          },
+        ]);
+        expect((await csms.waitForFrame(result("res-1")))[2]).toEqual({
+          status: "Accepted",
+        });
+        const node = (id: string, type: string, data: object = {}) =>
+          ({
+            id,
+            type,
+            position: { x: 0, y: 0 },
+            data: { label: id, ...data },
+          }) as unknown as ScenarioNode;
+        const scenario: ScenarioDefinition = {
+          id: "group-remote-start",
+          name: "group-remote-start",
+          targetType: "connector",
+          targetId: 1,
+          nodes: [
+            node("start", "start"),
+            node("remote", "remoteStartTrigger"),
+            node("tx", "transaction", { action: "start" }),
+          ],
+          edges: [
+            { id: "e1", source: "start", target: "remote" },
+            { id: "e2", source: "remote", target: "tx" },
+          ] as ScenarioDefinition["edges"],
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        };
+        const executor = new ScenarioExecutor(
+          scenario,
+          createScenarioExecutorCallbacks({
+            chargePoint: cp,
+            connector: cp.getConnector(1)!,
+          }),
+        );
+        const run = executor.start().catch(() => undefined);
+        try {
+          while (!cp.isScenarioHandled(1)) await Bun.sleep(5);
+          // The station does not know MEMBER's group: only the request names it.
+          expect(cp.knownParentIdOf("MEMBER")).toBeUndefined();
+          expect(
+            await ask({
+              remoteStartId: 3,
+              evseId: 1,
+              idToken: { idToken: "MEMBER", type: "Central" },
+              groupIdToken: { idToken: "GROUP", type: "Central" },
+            }),
+          ).toEqual({ status: "Accepted" });
+          const started = await csms.waitForFrame(
+            (f) => f[0] === 2 && f[2] === "TransactionEvent",
+          );
+          expect(started[3]).toMatchObject({
+            eventType: "Started",
+            evse: { id: 1 },
+            idToken: { idToken: "MEMBER" },
+            reservationId: 5,
+            transactionInfo: { remoteStartId: 3 },
+          });
+        } finally {
+          executor.stop();
+          await run;
+        }
+      },
+      1,
+    );
   });
 
   it("rejects an unknown EVSE and a busy EVSE", async () => {

@@ -68,6 +68,18 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])("Device Model registry (%s)", (v) => {
     });
   });
 
+  // #846: Part 2 J "Meter Values" gives both intervals "in seconds".
+  it("reports the TxEndedInterval variables with unit s", () => {
+    const data = buildBaseReportData(cpFor(v).configuration);
+    const units = data
+      .filter((d) => d.variable.name === "TxEndedInterval")
+      .map((d) => [d.component.name, d.variableCharacteristics?.unit]);
+    expect(units).toEqual([
+      ["SampledDataCtrlr", "s"],
+      ["AlignedDataCtrlr", "s"],
+    ]);
+  });
+
   it("keeps variable monitoring on the registered variables", () => {
     const cp = cpFor(v);
     const res = handleSetVariableMonitoringV201(

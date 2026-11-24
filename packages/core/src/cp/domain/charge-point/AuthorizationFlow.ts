@@ -1,6 +1,7 @@
 import { LogType, type Logger } from "../../shared/Logger";
 import type { EventEmitter } from "../../shared/EventEmitter";
 import type { SimClock, TimerHandle } from "../../shared/clock";
+import { DEFAULT_AUTHORIZATION_CACHE_MAX_ENTRIES } from "../auth/AuthorizationCache";
 import type { LocalOnlyDecision } from "../auth/LocalAuthorizationResolver";
 import type { LocalAuthListManager } from "../auth/LocalAuthList";
 import type {
@@ -41,8 +42,13 @@ export interface AuthorizationFlowHost {
  * energy hold after a non-Accepted id. The charge point keeps the public
  * methods as thin delegates.
  */
+/** The most parents {@link AuthorizationFlow} keeps from CSMS verdicts
+ *  (#839); the least recently recorded one goes first. */
+export const MAX_AUTHORIZED_PARENTS = DEFAULT_AUTHORIZATION_CACHE_MAX_ENTRIES;
+
 export class AuthorizationFlow {
-  /** Parent id / groupIdToken of the tags the CSMS authorized (reservations). */
+  /** Parent id / groupIdToken of the tags the CSMS authorized (reservations),
+   *  in recording order, bounded by {@link MAX_AUTHORIZED_PARENTS}. */
   private readonly _authorizedParents = new Map<string, string>();
 
   constructor(private readonly host: AuthorizationFlowHost) {}
@@ -50,7 +56,8 @@ export class AuthorizationFlow {
   /**
    * The parent id (1.6) or groupIdToken (2.x) the station knows for `idTag`:
    * Local Authorization List, then Authorization Cache, then the last
-   * Authorize.conf (kept even when the cache is off). Reservation matching by
+   * Authorize.conf (kept even when the cache is off, until a reset, for at
+   * most {@link MAX_AUTHORIZED_PARENTS} tags, #839). Reservation matching by
    * parent (1.6 §5.13, H03.FR.04/07) uses it; it never asks the CSMS itself.
    */
   knownParentIdOf(idTag: string): string | undefined {
@@ -72,10 +79,14 @@ export class AuthorizationFlow {
     idToken: string,
     result: CsmsAuthorizationResult,
   ): void {
+    // Delete first so a new verdict moves the tag to the newest position.
+    this._authorizedParents.delete(idToken);
     if (result.parentId !== undefined) {
       this._authorizedParents.set(idToken, result.parentId);
-    } else {
-      this._authorizedParents.delete(idToken);
+      if (this._authorizedParents.size > MAX_AUTHORIZED_PARENTS) {
+        const oldest = this._authorizedParents.keys().next().value;
+        if (oldest !== undefined) this._authorizedParents.delete(oldest);
+      }
     }
     if (this.host.authorization().recordCsmsResult(idToken, result)) {
       this.host
@@ -106,6 +117,13 @@ export class AuthorizationFlow {
         },
       );
     }
+  }
+
+  /** A reset reboots the station: the parents the CSMS verdicts carried are
+   *  volatile memory and do not survive it (#839). The Authorization Cache
+   *  is left alone. */
+  forgetAuthorizedParents(): void {
+    this._authorizedParents.clear();
   }
 
   /** ClearCache (1.6 §5.4): empty the Authorization Cache. Returns whether

@@ -22,6 +22,7 @@ import type {
 import type { ChargingProfileStore } from "./ChargingProfileStore";
 import type { MeterSampling } from "./MeterSampling";
 import { VehicleBehaviorDriver } from "./VehicleBehaviorDriver";
+import { resumeAfterEvseSuspension } from "./resumeAfterEvseSuspension";
 
 /** What the connector wiring needs from its charge point. */
 export interface ConnectorWiringHost {
@@ -140,14 +141,7 @@ export class ConnectorWiring {
               `Connector ${connectorId} schedule period limit=${watts}W, resuming → Charging`,
               LogType.OCPP,
             );
-          // §4.9: SuspendedEVSE takes precedence over SuspendedEV; once the
-          // EVSE side lifts, an EV that is not ready leaves SuspendedEV (#871).
-          this.host.chargePoint.updateConnectorStatus(
-            connectorId,
-            connector.evConnection === "connected-not-ready"
-              ? OCPPStatus.SuspendedEV
-              : OCPPStatus.Charging,
-          );
+          resumeAfterEvseSuspension(this.host.chargePoint, connector);
         }
       });
       // #722: MeterValueSampleInterval drives the periodic MeterValues of a
@@ -185,14 +179,20 @@ export class ConnectorWiring {
             },
             requestStop: (id) => {
               if (this.host.chargePoint.poweredOff) return;
+              // Asked on every tick: once the authorization ended (E15.FR.05),
+              // the transaction waits for the cable, not for another stop.
+              if (connector.transaction?.authorizationEnded) return;
               this.host
                 .logger()
                 .info(
                   `Connector ${id} vehicle asked to end the session`,
                   LogType.TRANSACTION,
                 );
+              // E15.FR.04: StopAuthorized + StoppedByEV. 1.6 has no such
+              // Reason (EVDisconnected is the cable leaving), so none is set.
               this.host.chargePoint.stopTransaction(connector, undefined, {
-                triggerReason: "EnergyLimitReached",
+                triggerReason: "StopAuthorized",
+                stoppedReason: "StoppedByEV",
               });
             },
           },

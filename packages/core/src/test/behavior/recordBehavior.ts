@@ -45,7 +45,10 @@ export interface RecordBehaviorOptions {
   readonly horizonMs?: number;
   /** Length of one clock step, the resolution of the delays; default 250 ms. */
   readonly stepMs?: number;
-  /** The build that recorded it; default `"unknown"`. */
+  /**
+   * The build that recorded it; default the version label
+   * (`simulatorVersion`), as `recordedFrom.commit` says in the schema.
+   */
   readonly commit?: string;
   /** The simulator version that recorded it; default `"unknown"`. */
   readonly simulatorVersion?: string;
@@ -229,20 +232,18 @@ function build(input: BuildInput): BehaviorRecording {
     }
     if (frame.dir === "CP>" && frame.id === callId && frame.kind === "error") {
       answered = true;
-      const e = frame.payload as {
-        errorCode?: string;
-        errorDescription?: string;
-      };
+      // FakeCsms records a CALLERROR as { code, description, details }.
+      const e = frame.payload as { code?: string; description?: string };
       steps.push({
         type: "callResponse",
         label: `Answer ${trigger.action} with an error`,
         data: {
           kind: "error",
-          errorCode: e.errorCode ?? "GenericError",
-          errorDescription: e.errorDescription ?? "",
+          errorCode: e.code ?? "GenericError",
+          errorDescription: e.description ?? "",
         },
       });
-      say("CP", "CSMS", `${trigger.action} error ${e.errorCode ?? ""}`);
+      say("CP", "CSMS", `${trigger.action} error ${e.code ?? ""}`);
       last = at;
       continue;
     }
@@ -311,11 +312,12 @@ function build(input: BuildInput): BehaviorRecording {
     skipped.push(`${trigger.action}: the behavior sent no answer`);
   }
 
+  const version = options.simulatorVersion ?? "unknown";
   const recordedFrom: ScenarioRecordedFrom = {
     behaviorId: input.behaviorId,
-    commit: options.commit ?? "unknown",
+    commit: options.commit ?? version,
     seed: input.seed,
-    version: options.simulatorVersion ?? "unknown",
+    version,
   };
   const id = `recorded-${input.behaviorId.replace(/[^A-Za-z0-9]+/g, "-")}-${trigger.action}`;
   const nodes: ScenarioNode[] = [

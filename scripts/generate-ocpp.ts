@@ -516,6 +516,32 @@ export function strictValidationErrors(
   return (validate.errors ?? []).map((error) =>
     \`\${error.instancePath} \${error.message ?? ""}\`.trim(),
   );
+}
+
+/** One schema violation, with the keyword that failed (for error-code mapping). */
+export interface ValidationIssue {
+  /** JSON-schema keyword: \`required\`, \`type\`, \`enum\`, \`maxLength\`, ... */
+  readonly keyword: string;
+  readonly instancePath: string;
+  readonly message: string;
+}
+
+/** Like strictValidationErrors, but keeps the failing keyword of each issue. */
+export function strictValidationIssues(
+  schema: object,
+  data: unknown,
+): ValidationIssue[] {
+  const validate = strictValidatorFor(schema);
+
+  if (validate(data)) {
+    return [];
+  }
+
+  return (validate.errors ?? []).map((error) => ({
+    keyword: error.keyword,
+    instancePath: error.instancePath,
+    message: \`\${error.instancePath} \${error.message ?? ""}\`.trim(),
+  }));
 }`,
   );
 }
@@ -647,17 +673,21 @@ export enum ActionNameV201 {
   UpdateFirmware = "UpdateFirmware",
 }
 
+/** OCPP 2.0.1 / 2.1 Part 4 RPC error codes: \`FormationViolation\` became
+ * \`FormatViolation\`, \`OccurenceConstraintViolation\` gained its second \`r\`. */
 export enum OCPPErrorCodeV201 {
   NotImplemented = "NotImplemented",
   NotSupported = "NotSupported",
   InternalError = "InternalError",
   ProtocolError = "ProtocolError",
   SecurityError = "SecurityError",
-  FormationViolation = "FormationViolation",
+  FormatViolation = "FormatViolation",
   PropertyConstraintViolation = "PropertyConstraintViolation",
-  OccurenceConstraintViolation = "OccurenceConstraintViolation",
+  OccurrenceConstraintViolation = "OccurrenceConstraintViolation",
   TypeConstraintViolation = "TypeConstraintViolation",
   GenericError = "GenericError",
+  MessageTypeNotSupported = "MessageTypeNotSupported",
+  RpcFrameworkError = "RpcFrameworkError",
 }`,
   );
 }

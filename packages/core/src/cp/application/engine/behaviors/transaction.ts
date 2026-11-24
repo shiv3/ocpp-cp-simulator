@@ -1,4 +1,7 @@
-import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
+import type {
+  Behavior,
+  BehaviorParams,
+} from "@ocpp-cp-simulator/contracts/behavior";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { IdTokenTypeName } from "../../../domain/connector/Transaction";
 import { OCPPStatus } from "../../../domain/types/OcppTypes";
@@ -9,6 +12,37 @@ import { decideRemoteStart } from "./remoteStartValidation";
 
 export { startTransaction } from "./transactionStart";
 export { cleanTransaction, stopTransaction } from "./transactionStop";
+
+/**
+ * The knob of a remote start (#1135). `start` is what the behavior always
+ * did. `acceptOnly` runs the same checks and gives the same answer, then does
+ * nothing: no Authorize, no StartTransaction / TransactionEvent, no status
+ * change, and no hand-over to a scenario parked on the connector. It models a
+ * station that accepts a remote start and never begins the transaction, so a
+ * CSMS can test its remote start timeout.
+ */
+const PARAMS: BehaviorParams = {
+  schema: {
+    type: "object",
+    properties: {
+      remoteStart: {
+        type: "string",
+        enum: ["start", "acceptOnly"],
+        title: "Remote start",
+        description:
+          "start: start the transaction after an accepted RemoteStartTransaction / RequestStartTransaction. acceptOnly: answer as usual (invalid requests are still rejected), then never start it",
+      },
+    },
+  },
+  defaults: { remoteStart: "start" },
+};
+
+function acceptOnlyLog(cp: ChargePoint, action: string, connectorId: number) {
+  cp.logger.info(
+    `${action} accepted on connector ${connectorId}; remoteStart=acceptOnly: not starting the transaction`,
+    LogType.TRANSACTION,
+  );
+}
 
 /**
  * The default behavior of a transaction (docs/concepts/charger-engine.md,
@@ -35,10 +69,11 @@ export function transactionBehavior(cp: ChargePoint): Behavior {
   return {
     api: 1,
     id: "default.transaction",
+    params: PARAMS,
     onCall: {
       RemoteStartTransaction: {
         mode: "replace",
-        handle: (request) => {
+        handle: (request, ctx) => {
           const { idTag, connectorId } = request as {
             idTag: string;
             connectorId?: number;
@@ -53,6 +88,10 @@ export function transactionBehavior(cp: ChargePoint): Behavior {
             : pickRemoteStartConnector(cp, idTag);
           if (resolved === undefined) {
             return { response: { status: "Rejected" } };
+          }
+          if (ctx.params.remoteStart === "acceptOnly") {
+            acceptOnlyLog(cp, "RemoteStartTransaction", resolved);
+            return { response: { status: "Accepted" } };
           }
           // 1.6 §5.11: with AuthorizeRemoteTxRequests the request is answered,
           // then authorized like a local action (#921; the order the OCA
@@ -99,7 +138,7 @@ export function transactionBehavior(cp: ChargePoint): Behavior {
       },
       RequestStartTransaction: {
         mode: "replace",
-        handle: (request) => {
+        handle: (request, ctx) => {
           const req = request as {
             evseId?: number;
             remoteStartId: number;
@@ -116,11 +155,16 @@ export function transactionBehavior(cp: ChargePoint): Behavior {
             awaiting?.awaitingAuthorization && awaiting.stopTime === null
               ? awaiting.cpTransactionId
               : undefined;
+          const response = {
+            status: "Accepted",
+            ...(startedId !== undefined ? { transactionId: startedId } : {}),
+          };
+          if (ctx.params.remoteStart === "acceptOnly") {
+            acceptOnlyLog(cp, "RequestStartTransaction", connectorId);
+            return { response };
+          }
           return {
-            response: {
-              status: "Accepted",
-              ...(startedId !== undefined ? { transactionId: startedId } : {}),
-            },
+            response,
             after: async () => {
               await remoteStart(
                 cp,

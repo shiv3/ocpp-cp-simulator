@@ -23,6 +23,8 @@ const BUILTIN_TITLE_KEYS = {
   "default.logs.uploadMs": "scenarioEditor.params.logs.uploadMs",
   "default.reset.delayMs": "scenarioEditor.params.reset.delayMs",
   "default.unlock.outcome": "scenarioEditor.params.unlock.outcome",
+  "default.transaction.remoteStart":
+    "scenarioEditor.params.transaction.remoteStart",
 } as const;
 
 type BuiltinTitleKey = keyof typeof BUILTIN_TITLE_KEYS;

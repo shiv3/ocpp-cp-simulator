@@ -173,6 +173,7 @@
   "scenarioEditor.params.logs.uploadMs": "Durée du téléversement (ms)",
   "scenarioEditor.params.reset.delayMs": "Délai avant la réinitialisation (ms)",
   "scenarioEditor.params.unlock.outcome": "Résultat",
+  "scenarioEditor.params.transaction.remoteStart": "Démarrage à distance",
   "scenarioEditor.node.notify": "Notification d'état",
   "scenarioEditor.node.switch": "Aiguillage (switch)",
   "scenarioEditor.node.choice": "Tirage (choice)",

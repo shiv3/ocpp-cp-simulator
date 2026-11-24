@@ -4,8 +4,12 @@ type: overview
 summary: Master summary of the OCPP CP Simulator — what it is, how the pieces fit together, the workspace packages and their boundaries, and where to read next.
 sources:
   - scripts/check-package-boundaries.ts
+  - scripts/build-ocpp-package.ts
+  - scripts/check-ocpp-pack.ts
+  - packages/ocpp/package.json
   - "issue #578"
-updated: 2026-11-15
+  - "issue #1053"
+updated: 2026-11-24
 ---
 
 # OCPP CP Simulator — overview
@@ -112,7 +116,7 @@ Last, [`scripts/check-file-size.ts`](../scripts/check-file-size.ts) backs ESLint
 
 | Package (`@ocpp-cp-simulator/<dir>`) | Holds                                                                                                                                                                                                   | May depend on                                         |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| `packages/ocpp`                      | the generated OCPP message types and validators (`src/`) and the vendored OCA schemas (`vendor/ocpp-schemas/`)                                                                                          | nothing                                               |
+| `packages/ocpp`                      | the generated OCPP message types and validators (`src/`) and the vendored OCA schemas (`vendor/ocpp-schemas/`); publishable, with curated entry points ([below](#publishable-packagesocpp))             | nothing                                               |
 | `packages/ocpp-rpc`                  | the domain-free OCPP-J frame codec and RPC endpoint (`src/`; [protocol stack](analyses/ocpp-protocol-stack.md)), portable                                                                               | ocpp                                                  |
 | `packages/contracts`                 | the wire contract of the daemon (`src/`; [control plane](concepts/control-plane.md))                                                                                                                    | nothing                                               |
 | `packages/trace`                     | the log-to-trace adapter (`src/`; [trace format](concepts/trace-format.md))                                                                                                                             | nothing                                               |
@@ -123,17 +127,19 @@ Last, [`scripts/check-file-size.ts`](../scripts/check-file-size.ts) backs ESLint
 | `apps/cli`                           | the CLI, the daemon, the MCP endpoint, `export-k6` and `analyze` (`src/`), and the tests that build the CLI bundle and the Tauri sidecar (`src/build/`)                                                 | every package except `apps/web`                       |
 | `apps/web`                           | the browser console: components, console pages, hooks and providers (`src/data/`), store, `lib`, assets, and the jsdom test setup                                                                       | every package except `apps/cli`                       |
 
-Packages are private, versionless and have no build step: each `package.json`
+Packages are private, versionless and have no build step (`packages/ocpp` is
+the exception: see [below](#publishable-packagesocpp)): each `package.json`
 exposes its sources through `"exports": { "./*": "./src/*.ts" }` (plus explicit
 entries for the few JSON files other packages import), so a specifier mirrors
 the path under `src/` — `@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint`.
 Bun, Vite and `tsc` (`moduleResolution: bundler`) read the TypeScript directly
 through the workspace links. Only `packages/ocpp-rpc` has a curated entry
-point (`src/index.ts`), and only by convention: its manifest still exports
+point (`src/index.ts`) by convention: its manifest still exports
 `"./*"`. Publishable packages with curated exports are the plan of
 [Reusable OCPP protocol stack](analyses/ocpp-protocol-stack.md)
-([#978](https://github.com/shiv3/ocpp-cp-simulator/issues/978)).
-Third-party dependencies are still declared once, in the root `package.json`.
+([#978](https://github.com/shiv3/ocpp-cp-simulator/issues/978)); `packages/ocpp`
+is the first. Third-party dependencies are declared once, in the root
+`package.json`, except for a publishable package, which declares its own.
 Each package has a composite `tsconfig.json` that extends
 `tsconfig.base.json` and references the packages it depends on; `bun run
 typecheck` is `tsc -b`.
@@ -142,11 +148,57 @@ Rules the check enforces:
 
 - An import (value, `import type`, `export … from`, `import()`, `new URL("./x", import.meta.url)`, relative, `@/` or `@ocpp-cp-simulator/…`) from a package into one that is not in its "may depend on" column fails, **type-only imports included**: TypeScript project references forbid cycles at the type level too. Test files are checked like any other and belong to the package of the directory they sit in.
 - Across packages the import must be an `@ocpp-cp-simulator/<package>/…` specifier that resolves through the package's `exports`, never a relative path into another package. Inside one package imports stay relative (inside `apps/web` the `@/` alias, `apps/web/src`, also works).
-- Each `package.json` is private, named after its directory, and declares exactly the `workspace:*` dependencies its imports need — no more, no less. The root `package.json` must not use `workspace:` anywhere, or the published tarball would not install outside the repository.
+- Each `package.json` is private, named after its directory, and declares exactly the `workspace:*` dependencies its imports need — no more, no less. A package in the script's `PUBLISHABLE_PACKAGES` (today `ocpp`) says `"private": false` instead, and its manifest must also declare in `dependencies` (or `peerDependencies`) exactly the third-party packages its non-test sources import, and carry a `publishConfig.exports` with the same keys as `exports`, each entry `{ "types", "default" }` pointing at the built form of the workspace target (`./src/x.ts` → `./lib/x.d.ts` / `./lib/x.js`). `exports` values may be conditional objects; the check resolves them like Node, with the conditions `types` and `import`. The root `package.json` must not use `workspace:` anywhere, or the published tarball would not install outside the repository.
 - `ocpp`, `contracts`, `trace`, `k6-runtime`, `vehicle`, `core` and `client` must run in both Bun and the browser, so their non-test files may not import `react*`, `jotai`, `zustand`, `@xyflow/*`, `@radix-ui/*`, Vite-only specifiers (`?url`, `?raw`, `virtual:`), `bun:*` or Node built-ins, except for the files on the commented allow-list in the script (today the daemon's two SQLite stores, `BunSqliteDatabase.ts` and `NodeSqliteDatabase.ts` in `packages/core/src/cp/infrastructure/persistence/`). Type-only imports of such packages are erased and not flagged.
 - A file under `packages/` or `apps/` that matches no `PACKAGE_MAP` entry fails the check, so a new workspace directory has to be registered on purpose. Known exceptions go in the script's `KNOWN_VIOLATIONS` / `TEST_ALLOW_LIST`, each with a reason; a stale entry also fails.
 - Inside `packages/core/src/cp/` the layers have a direction ([#571](sources/github-issues.md)): `domain/` imports only `domain/` and `shared/`; `application/` imports `domain/`, `application/` and `shared/`, never `infrastructure/`; `infrastructure/` may import every layer; `shared/` imports only `shared/`. `domain/` and `shared/` also may not import core code outside `src/cp` or anything under `apps/`; other workspace packages stay governed by the table above. Type-only imports count, test files are not checked. The script's `LAYER_EXEMPTIONS` list is empty since [#575](https://github.com/shiv3/ocpp-cp-simulator/issues/575) moved `ChargePoint`'s last imports of `application/` behind domain interfaces, which meets the goal of the epic [#577](https://github.com/shiv3/ocpp-cp-simulator/issues/577); the list is kept, so a new violation fails, and so would an entry that no longer matches.
 - A file under `packages/` or `apps/`, test files included, may not reach itself through static value imports, in one package or across several; there is no allow-list for this rule. `import`, a side-effect import, `export … from` (`export *` included, even of a types-only module) and `require` count; `import type`, `export type … from`, `import("x").T` and a dynamic `import()` do not ([#570](sources/github-issues.md)). The ESLint rule `@typescript-eslint/consistent-type-imports` makes an import used only as a type say so, or it would count here. `scripts/` and `e2e/` are not scanned.
+
+### Publishable `packages/ocpp`
+
+`@ocpp-cp-simulator/ocpp` (generated types, Ajv validators, enums, the
+vendored OCA schemas) is built to be installed outside the monorepo (#1053).
+Nothing is published yet and the version stays `0.0.0`.
+
+| Entry point                                         | Workspace source           | Holds                                                                                                                   |
+| --------------------------------------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `@ocpp-cp-simulator/ocpp`                           | `src/index.ts`             | everything below except `schema-sources` and the per-message type modules                                               |
+| `@ocpp-cp-simulator/ocpp/v16`, `/v201`, `/v21`      | `src/<version>/index.ts`   | the message types, `<version>Schemas`, the `isValid…` guards and `actionValidator…`                                     |
+| `@ocpp-cp-simulator/ocpp/validation`                | `src/validation/index.ts`  | the Ajv engine (`validateOCPPPayload`, `(strict)validationErrors`, `strictValidationIssues`) and every version's guards |
+| `@ocpp-cp-simulator/ocpp/schema-sources`            | `src/schemaSources.ts`     | the verbatim text of every vendored schema and of its `NOTICE` (the MCP resources)                                      |
+| `@ocpp-cp-simulator/ocpp/<version>/types/<message>` | `src/<version>/types/*.ts` | one message's nested types (enums such as `AuthorizationStatusEnumType`), types only                                    |
+
+Enums are in the root entry. No other path is exported: the workspace imports
+the package through these entries too, and `check:boundaries` reports any
+other `@ocpp-cp-simulator/ocpp/…` specifier as unresolved.
+
+**Two manifests in one file.** `packages/ocpp/package.json` stays the
+workspace form: `exports` maps each entry to its TypeScript source, so Bun,
+Vite, `tsc`, `Bun.build` and rolldown keep reading sources without a build
+step and without a custom export condition (Bun applies one only from a
+command-line flag). The published entries sit next to them in
+`publishConfig.exports`, as `{ "types": "./lib/….d.ts", "default": "./lib/….js" }`.
+`bun run build:ocpp` (`scripts/build-ocpp-package.ts`) writes
+`packages/ocpp/dist/`, a standalone package directory: `tsc -p
+packages/ocpp/tsconfig.build.json` emits ESM JavaScript and declarations
+into `lib/`, `vendor/ocpp-schemas/` is copied byte for byte (tsc would
+re-serialize the JSON), the root `LICENSE` is copied, and `package.json` is
+the workspace manifest with `publishConfig.exports` as its `exports`,
+`"private": false` and no `scripts`. `ajv` and `ajv-draft-04` are its
+`dependencies`. The workspace manifest's `prepack` script fails, so packing
+`packages/ocpp` itself (TypeScript sources) is refused.
+
+The generated sources are written for this: relative imports carry `.js`
+and JSON imports carry `with { type: "json" }` (`scripts/generate-ocpp.ts`),
+so the emitted JavaScript runs as native ESM under Node and Bun.
+
+`bun run check:ocpp-pack` (`scripts/check-ocpp-pack.ts`, a CI step of the
+`test` job) builds and packs `dist/` with `bun pm pack`, checks the file list
+(`lib/`, `vendor/ocpp-schemas/NOTICE`, `LICENSE`, no `.ts` source), installs
+the tarball with npm into a throwaway project in the system temp directory,
+imports every entry point under Node and Bun, validates a valid and an
+invalid message per OCPP version, and type-checks a consumer with `module:
+nodenext`. `--keep` keeps the project. It needs network access for npm.
 
 ### What goes where in `packages/core/src`
 

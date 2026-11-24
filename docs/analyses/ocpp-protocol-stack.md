@@ -12,6 +12,8 @@ sources:
   - packages/ocpp-rpc/src/__tests__/webSocket.bun.test.ts
   - scripts/check-package-boundaries.ts
   - scripts/check-direct-time.ts
+  - scripts/build-ocpp-package.ts
+  - scripts/check-ocpp-pack.ts
   - packages/core/src/cp/infrastructure/transport/
   - packages/trace/src/logEntryToTrace.ts
 related:
@@ -21,7 +23,7 @@ related:
   - ../concepts/network-simulation.md
   - ../concepts/trace-format.md
   - ../concepts/charger-engine.md
-updated: 2026-11-21
+updated: 2026-11-24
 ---
 
 # Reusable OCPP protocol stack
@@ -44,7 +46,7 @@ All paths below are under `packages/core/src/cp/` unless stated otherwise.
 
 | Concern                  | Where it lives                                                                                                                                                                                                                                                                                       | Simulator coupling                                                                                                                                                                                                                                                                                                        |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Model                    | `packages/ocpp` (generated types, validators, vendored OCA schemas)                                                                                                                                                                                                                                  | None, but not publishable: private at `0.0.0`, exports `"./*": "./src/*.ts"`, extensionless relative imports, JSON imported without import attributes, `ajv` / `ajv-draft-04` declared only in the root manifest                                                                                                          |
+| Model                    | `packages/ocpp` (generated types, validators, vendored OCA schemas)                                                                                                                                                                                                                                  | None. Publishable since #1053: curated entry points, ESM + declarations built into `packages/ocpp/dist`, `ajv` / `ajv-draft-04` declared, a tarball install check under Node and Bun ([Overview](../overview.md#publishable-packagesocpp)); not published yet                                                             |
 | OCPP-J frame codec       | `packages/ocpp-rpc` now; still re-implemented in `infrastructure/transport/ws/wsNetworkSim.ts` (`dispatchIncomingFrame`), `transport/network-sim/FrameContext.ts`, `RawFrameSender.ts` (`messageIdOf`), `packages/k6-runtime/src/frames.ts` and the mock CSMS helpers                                | `k6-runtime/src/frames.ts` is copied verbatim into a k6 export and must stay import-free                                                                                                                                                                                                                                  |
 | Correlation and timeouts | `CallWaiters` (now a `realClock` subclass of ocpp-rpc's) covers only DataTransfer and expert calls (`ExpertCalls.ts`, `RawFrameSender.ts`); the real correlation is `transport/v16/serialCallQueueV16.ts` + `RequestHistory` (`v16/outboundRequestsV16.ts`) and `transport/v201/callPipelineV201.ts` | Both `SerialCallQueueV16` and `CallPipelineV201` hold a `ChargePoint`                                                                                                                                                                                                                                                     |
 | WebSocket transport      | `infrastructure/transport/OCPPWebSocket.ts` and `ws/` (opener, close handling, ping, `reconnectScheduler.ts`), `profile/subprotocols.ts`                                                                                                                                                             | `OCPPWebSocket` builds a `NetworkSimController` in its constructor; `domain/transport/ChargePointSocket.ts` mixes transport and fault control; `ws/reconnectScheduler.ts` arms raw `setTimeout` / `Date.now()`; the negotiated subprotocol is exposed by `ws/socketWrappers.ts` but never compared with the one requested |
@@ -73,7 +75,7 @@ package is open question 1 below.
 
 | Module                | Responsibility                                                                                   | Status                                                                                                                                                                  |
 | --------------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ocpp-model`          | Versioned types, schemas, enums, validation                                                      | `packages/ocpp`, unrenamed; publishable form is [#1053](https://github.com/shiv3/ocpp-cp-simulator/issues/1053)                                                         |
+| `ocpp-model`          | Versioned types, schemas, enums, validation                                                      | `packages/ocpp`, unrenamed; publishable form done in [#1053](https://github.com/shiv3/ocpp-cp-simulator/issues/1053) (not published yet)                                |
 | `ocpp-rpc`            | Frame codec, CALL / CALLRESULT / CALLERROR correlation, timeouts, error-code dialects            | **`packages/ocpp-rpc`, consumed by core** (this page); the version-specific correlators move onto it in [#1054](https://github.com/shiv3/ocpp-cp-simulator/issues/1054) |
 | `ocpp-transport-ws`   | Opening, subprotocol negotiation, security profiles 1–3, ping, reconnect primitive               | In core; [#1057](https://github.com/shiv3/ocpp-cp-simulator/issues/1057), after [#1056](https://github.com/shiv3/ocpp-cp-simulator/issues/1056)                         |
 | `ocpp-transport-soap` | SOAP 1.2 envelopes, WS-Addressing, HTTP, the 1.2 / 1.5 / 1.6S dialects                           | In core; [#1058](https://github.com/shiv3/ocpp-cp-simulator/issues/1058)                                                                                                |
@@ -223,10 +225,11 @@ Tests in `packages/ocpp-rpc/src/__tests__/` import only the public entries of
 - `frames.test.ts` pins the encoded bytes of all five frame types and each
   decode error.
 
-**What it does not prove.** Nothing is installed outside the monorepo: the
-package resolves through workspace links, and `packages/ocpp` is not publishable
-yet. The RFC's Phase 4 box "verify consumption from an independently installed
-package" stays unchecked until #1053 and
+**What it does not prove.** `ocpp-rpc` is not installed outside the monorepo:
+it resolves through workspace links. `packages/ocpp` is publishable since
+#1053 and `bun run check:ocpp-pack` installs its tarball outside the workspace,
+but `ocpp-rpc` has no build yet. The RFC's Phase 4 box "verify consumption from
+an independently installed package" stays unchecked until
 [#1063](https://github.com/shiv3/ocpp-cp-simulator/issues/1063) (standalone
 station and CSMS examples installed from packed tarballs). No SOAP exchange is
 covered, the 2.1 message types are exchanged in memory only, and the WebSocket
@@ -277,21 +280,21 @@ maintainer can still ask for a change on that pull request.
 
 All are sub-issues of #978.
 
-| Phase                   | Issue                                                           | Work                                                                                                   |
-| ----------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| 1 — model package       | [#1051](https://github.com/shiv3/ocpp-cp-simulator/issues/1051) | Closed by #1065: `scripts/fetch-ocpp-schemas.sh` writes to `packages/ocpp/vendor/`                     |
-| 1 — model package       | [#1052](https://github.com/shiv3/ocpp-cp-simulator/issues/1052) | OCA (CC BY-ND) attribution missing from the CLI and web third-party notices                            |
-| 1 — model package       | #1053                                                           | Publishable `packages/ocpp`: build, curated exports, declared ajv, tarball install check               |
-| 2 — protocol primitives | done here                                                       | `packages/ocpp-rpc`: codec, `CallWaiters`, `RpcEndpoint`, dialects, validator                          |
-| 2 — protocol primitives | [#1118](https://github.com/shiv3/ocpp-cp-simulator/issues/1118) | OCPP 2.1 SEND and CALLRESULTERROR in the codec and the endpoint; core's inline copies removed          |
-| 2 — protocol primitives | #1054                                                           | Generic correlator under `SerialCallQueueV16` / `RequestHistory`, `CallPipelineV201`, `RawFrameSender` |
-| 2 — protocol primitives | #1055                                                           | Frame-observer port replacing log-line parsing in trace                                                |
-| 2 — protocol primitives | #1060                                                           | Spec-conformant replies to malformed frames                                                            |
-| 2 — protocol primitives | [#1062](https://github.com/shiv3/ocpp-cp-simulator/issues/1062) | Mock CSMS helpers and the `wsNetworkSim` inline CALLERROR on the ocpp-rpc codec                        |
-| 2 — protocol primitives | #1059                                                           | Inbound dispatch on ocpp-rpc handler registration (the `ocpp-toolkit` station API)                     |
-| 2 — protocol primitives | #1074                                                           | Typed per-version clients over `RpcEndpoint`, generated from the schemas (decision 3)                  |
-| 3 — transports          | #1056                                                           | Network faults as an injected link decorator; `ChargePointSocket` split                                |
-| 3 — transports          | #1057                                                           | Extract `ocpp-transport-ws`                                                                            |
-| 3 — transports          | #1058                                                           | Extract `ocpp-transport-soap`                                                                          |
-| 3 — transports          | [#1061](https://github.com/shiv3/ocpp-cp-simulator/issues/1061) | Verify the negotiated subprotocol after open                                                           |
-| 4 — independent use     | #1063                                                           | Standalone station and CSMS examples from packed tarballs (blocked by #1053, #1057, #1058)             |
+| Phase                   | Issue                                                           | Work                                                                                                                                         |
+| ----------------------- | --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1 — model package       | [#1051](https://github.com/shiv3/ocpp-cp-simulator/issues/1051) | Closed by #1065: `scripts/fetch-ocpp-schemas.sh` writes to `packages/ocpp/vendor/`                                                           |
+| 1 — model package       | [#1052](https://github.com/shiv3/ocpp-cp-simulator/issues/1052) | OCA (CC BY-ND) attribution missing from the CLI and web third-party notices                                                                  |
+| 1 — model package       | [#1053](https://github.com/shiv3/ocpp-cp-simulator/issues/1053) | Done: build into `packages/ocpp/dist`, curated exports, declared ajv, `bun run check:ocpp-pack` (packed tarball imported under Node and Bun) |
+| 2 — protocol primitives | done here                                                       | `packages/ocpp-rpc`: codec, `CallWaiters`, `RpcEndpoint`, dialects, validator                                                                |
+| 2 — protocol primitives | [#1118](https://github.com/shiv3/ocpp-cp-simulator/issues/1118) | OCPP 2.1 SEND and CALLRESULTERROR in the codec and the endpoint; core's inline copies removed                                                |
+| 2 — protocol primitives | #1054                                                           | Generic correlator under `SerialCallQueueV16` / `RequestHistory`, `CallPipelineV201`, `RawFrameSender`                                       |
+| 2 — protocol primitives | #1055                                                           | Frame-observer port replacing log-line parsing in trace                                                                                      |
+| 2 — protocol primitives | #1060                                                           | Spec-conformant replies to malformed frames                                                                                                  |
+| 2 — protocol primitives | [#1062](https://github.com/shiv3/ocpp-cp-simulator/issues/1062) | Mock CSMS helpers and the `wsNetworkSim` inline CALLERROR on the ocpp-rpc codec                                                              |
+| 2 — protocol primitives | #1059                                                           | Inbound dispatch on ocpp-rpc handler registration (the `ocpp-toolkit` station API)                                                           |
+| 2 — protocol primitives | #1074                                                           | Typed per-version clients over `RpcEndpoint`, generated from the schemas (decision 3)                                                        |
+| 3 — transports          | #1056                                                           | Network faults as an injected link decorator; `ChargePointSocket` split                                                                      |
+| 3 — transports          | #1057                                                           | Extract `ocpp-transport-ws`                                                                                                                  |
+| 3 — transports          | #1058                                                           | Extract `ocpp-transport-soap`                                                                                                                |
+| 3 — transports          | [#1061](https://github.com/shiv3/ocpp-cp-simulator/issues/1061) | Verify the negotiated subprotocol after open                                                                                                 |
+| 4 — independent use     | #1063                                                           | Standalone station and CSMS examples from packed tarballs (blocked by #1053, #1057, #1058)                                                   |

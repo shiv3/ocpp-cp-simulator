@@ -3,9 +3,9 @@ name: E2E
 # #624: the gocpp end-to-end suite (e2e/README.md) needs Go and takes a few
 # minutes, and it is not part of CI, so a regression against the independent
 # CSMS was found only when someone ran it locally. This workflow runs it on a
-# schedule, and by hand from the Actions tab. The gocpp revision under test is
-# the one pinned in e2e/csms/go.mod and go.sum, so a red run means the
-# simulator changed, not the oracle.
+# schedule, and by hand from the Actions tab. The CSMS under test is gocpp's
+# cmd/gocpp-csms at the version pinned in e2e/gocpp-csms.version, so a red run
+# means the simulator changed, not the oracle.
 on:
   schedule:
     # Mondays 03:17 UTC, off the hour.
@@ -37,24 +37,20 @@ jobs:
         with:
           bun-version-file: .tool-versions
 
-      # The toolchain version comes from the fixture's own go.mod.
+      # e2e/support/buildCsms.ts runs `go install` of the pinned CSMS; the
+      # module cache is keyed on the pin file. 1.26.0 is the minimum gocpp's
+      # go.mod declares.
       - name: Setup Go
         uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
-          go-version-file: e2e/csms/go.mod
-          cache-dependency-path: e2e/csms/go.sum
+          go-version: "1.26.0"
+          cache-dependency-path: e2e/gocpp-csms.version
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
         env:
           # @open-ocpp-trace/* is on GitHub Packages (bunfig.toml).
           GITHUB_TOKEN: ${{ github.token }}
-
-      # The fixture is an independent Go program with its own checks.
-      - name: Fixture lint and unit tests
-        run: |
-          bun run lint:e2e-csms
-          bun run test:e2e-csms
 
       - name: gocpp e2e suites
         run: bun run test:e2e

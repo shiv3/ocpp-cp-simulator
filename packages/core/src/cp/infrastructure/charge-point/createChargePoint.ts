@@ -6,7 +6,10 @@ import {
   type ChargePointSimulationOptions,
   type ChargePointTransportOptions,
 } from "../../domain/charge-point/ChargePoint";
-import type { ChargePointDeps } from "../../domain/charge-point/ChargePointDeps";
+import type {
+  ChargePointDeps,
+  ChargePointServiceFactories,
+} from "../../domain/charge-point/ChargePointDeps";
 import type { Database } from "../../domain/persistence/Database";
 import type { BootNotification } from "../../domain/types/OcppTypes";
 import type { OcppTlsOptions } from "../../domain/transport/ConnectionSecurity";
@@ -35,7 +38,10 @@ const DEFAULT_DEPS: Omit<ChargePointDeps, "logSink" | "repositories"> = {
  * calls the constructor directly, to inject test doubles. The parameters are
  * the constructor's, in the same order and with the same defaults, without the
  * final `deps`, plus `database`: the state database the log sink and the
- * repositories are built on (#878), `null` for in-memory state.
+ * repositories are built on (#878), `null` for in-memory state, and
+ * `services`: replacements for the default service factories (a load profile
+ * swaps the timeline and the state history for no-ops: each costs ~50 heap
+ * objects per charge point).
  */
 export function createChargePoint(
   id: string,
@@ -54,6 +60,7 @@ export function createChargePoint(
   cpoName?: string,
   tls?: OcppTlsOptions,
   simulation: ChargePointSimulationOptions = {},
+  services: Partial<ChargePointServiceFactories> = {},
 ): ChargePoint {
   return new ChargePoint(
     id,
@@ -74,6 +81,7 @@ export function createChargePoint(
     // `database = null` keeps the repositories no-ops (remote-mode browser).
     {
       ...DEFAULT_DEPS,
+      ...services,
       logSink: new LogRepository(database),
       repositories: createChargePointRepositories(id, database),
     },

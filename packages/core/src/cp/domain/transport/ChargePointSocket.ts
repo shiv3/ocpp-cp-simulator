@@ -35,6 +35,12 @@ export interface TransportObserverEvents {
    *  certificate while the renewed one was unconfirmed; the renewed one is
    *  discarded (A02.FR.29 reports it). */
   renewedClientCertificateDiscarded: Record<string, never>;
+  /** A text frame left the socket (after the network simulation released it
+   *  and the physical write succeeded). `raw` is the frame as written. */
+  frameSent: { raw: string };
+  /** A text frame arrived and is about to be parsed (after any simulated
+   *  delay). `raw` is the frame as received. */
+  frameReceived: { raw: string };
 }
 
 /**

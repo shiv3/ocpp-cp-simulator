@@ -124,6 +124,18 @@ export interface ChargePointCollaborators {
 }
 
 /**
+ * `ctx` extended with the collaborator's own members. Prototype-linked rather
+ * than spread: the ~45 closures of `ctx` are not copied into each of the ~15
+ * collaborators (each own property costs memory in a many-station process).
+ */
+function inheritCtx<C extends object, E extends object>(
+  ctx: C,
+  extra: E,
+): C & E {
+  return Object.assign(Object.create(ctx), extra);
+}
+
+/**
  * Build the collaborators of `cp`. Every host closure reads its target
  * lazily, through `ctx` or through the collaborators built here, so the
  * order of the entries below does not matter; none of the constructors
@@ -135,76 +147,91 @@ export function createCollaborators(
 ): ChargePointCollaborators {
   const bootState = new BootStateStore();
   const c: ChargePointCollaborators = {
-    authorizationFlow: new AuthorizationFlow({ ...ctx, chargePoint: cp }),
+    authorizationFlow: new AuthorizationFlow(
+      inheritCtx(ctx, { chargePoint: cp }),
+    ),
     bootState,
-    boot: new BootLifecycle({
-      ...ctx,
-      chargePoint: cp,
-      state: bootState,
-      outage: () => c.outage,
-      clearOutage: () => c.outage.clearOutage(),
-      power: () => c.power,
-    }),
+    boot: new BootLifecycle(
+      inheritCtx(ctx, {
+        chargePoint: cp,
+        state: bootState,
+        outage: () => c.outage,
+        clearOutage: () => c.outage.clearOutage(),
+        power: () => c.power,
+      }),
+    ),
     callOverrides: new CallOverrides(),
-    certSwitch: new ClientCertificateSwitch({
-      ...ctx,
-      reset: () => cp.reset(),
-    }),
-    configWiring: new ConfigurationWiring({
-      ...ctx,
-      chargePoint: () => cp,
-      rearmPeriodicSampling: () => c.sampling.rearmPeriodicSampling(),
-    }),
-    connectionTimeouts: new ConnectionTimeouts({ ...ctx, chargePoint: cp }),
-    connectorWiring: new ConnectorWiring({
-      ...ctx,
-      chargePoint: cp,
-      authorizationFlow: () => c.authorizationFlow,
-      sampling: () => c.sampling,
-    }),
+    certSwitch: new ClientCertificateSwitch(
+      inheritCtx(ctx, {
+        reset: () => cp.reset(),
+      }),
+    ),
+    configWiring: new ConfigurationWiring(
+      inheritCtx(ctx, {
+        chargePoint: () => cp,
+        rearmPeriodicSampling: () => c.sampling.rearmPeriodicSampling(),
+      }),
+    ),
+    connectionTimeouts: new ConnectionTimeouts(
+      inheritCtx(ctx, { chargePoint: cp }),
+    ),
+    connectorWiring: new ConnectorWiring(
+      inheritCtx(ctx, {
+        chargePoint: cp,
+        authorizationFlow: () => c.authorizationFlow,
+        sampling: () => c.sampling,
+      }),
+    ),
     deviceModel: new DeviceModelPublisher(ctx),
-    messaging: new StationMessaging({ ...ctx, chargePoint: cp }),
+    messaging: new StationMessaging(inheritCtx(ctx, { chargePoint: cp })),
     notifications: new StationNotifications(ctx),
-    outage: new OutageLifecycle({
-      ...ctx,
-      chargePoint: cp,
-      state: bootState,
-      boot: () => c.boot,
-      callOverrides: () => c.callOverrides,
-      certSwitch: () => c.certSwitch,
-      connectionTimeouts: () => c.connectionTimeouts,
-      power: () => c.power,
-      sampling: () => c.sampling,
-      scenarioCalls: () => c.scenarioCalls,
-    }),
-    plugIn: new PlugInFlow({
-      ...ctx,
-      chargePoint: cp,
-      connectionTimeouts: () => c.connectionTimeouts,
-    }),
-    power: new PowerLossController({
-      ...ctx,
-      chargePoint: cp,
-      markStartupEventPending: () => {
-        c.boot.startupEventPending = true;
-      },
-      teardownAfterClose: () => c.outage.teardownAfterClose(),
-    }),
-    profileControl: new ChargingProfileControl({ ...ctx, chargePoint: cp }),
-    resetOnIdle: new ResetOnIdle({
-      ...ctx,
-      chargePoint: cp,
-      markStartupEventPending: () => {
-        c.boot.startupEventPending = true;
-      },
-    }),
-    sampling: new MeterSampling({ ...ctx, chargePoint: cp }),
+    outage: new OutageLifecycle(
+      inheritCtx(ctx, {
+        chargePoint: cp,
+        state: bootState,
+        boot: () => c.boot,
+        callOverrides: () => c.callOverrides,
+        certSwitch: () => c.certSwitch,
+        connectionTimeouts: () => c.connectionTimeouts,
+        power: () => c.power,
+        sampling: () => c.sampling,
+        scenarioCalls: () => c.scenarioCalls,
+      }),
+    ),
+    plugIn: new PlugInFlow(
+      inheritCtx(ctx, {
+        chargePoint: cp,
+        connectionTimeouts: () => c.connectionTimeouts,
+      }),
+    ),
+    power: new PowerLossController(
+      inheritCtx(ctx, {
+        chargePoint: cp,
+        markStartupEventPending: () => {
+          c.boot.startupEventPending = true;
+        },
+        teardownAfterClose: () => c.outage.teardownAfterClose(),
+      }),
+    ),
+    profileControl: new ChargingProfileControl(
+      inheritCtx(ctx, { chargePoint: cp }),
+    ),
+    resetOnIdle: new ResetOnIdle(
+      inheritCtx(ctx, {
+        chargePoint: cp,
+        markStartupEventPending: () => {
+          c.boot.startupEventPending = true;
+        },
+      }),
+    ),
+    sampling: new MeterSampling(inheritCtx(ctx, { chargePoint: cp })),
     scenarioCalls: new ScenarioCallOwnership(ctx),
-    statusControl: new ConnectorStatusControl({
-      ...ctx,
-      chargePoint: cp,
-      connectionTimeouts: () => c.connectionTimeouts,
-    }),
+    statusControl: new ConnectorStatusControl(
+      inheritCtx(ctx, {
+        chargePoint: cp,
+        connectionTimeouts: () => c.connectionTimeouts,
+      }),
+    ),
   };
   return c;
 }

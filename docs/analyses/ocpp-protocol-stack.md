@@ -4,6 +4,9 @@ type: analysis
 summary: Design for #978 — where the OCPP-J/SOAP protocol code lives today and what ties it to the simulator, the target modules (model, rpc, transports, toolkit), the seams to cut, what the new domain-free packages/ocpp-rpc proves and does not, decisions on the RFC's open questions, and the phase → issue plan.
 sources:
   - "issue #978"
+  - "issue #1126"
+  - packages/core/src/cp/infrastructure/transport/wsUrlWithBasic.ts
+  - packages/core/src/cp/infrastructure/charge-point/createHeadlessServices.ts
   - packages/ocpp-rpc/src/index.ts
   - packages/ocpp-rpc/src/RpcEndpoint.ts
   - packages/ocpp-rpc/src/frames.ts
@@ -21,7 +24,7 @@ related:
   - ../concepts/network-simulation.md
   - ../concepts/trace-format.md
   - ../concepts/charger-engine.md
-updated: 2026-11-21
+updated: 2026-11-24
 ---
 
 # Reusable OCPP protocol stack
@@ -108,6 +111,28 @@ behaviour:
 5. **A `HandlerContext` without `ChargePoint`.** Handlers get the payload, the message
    id and the services they need; the simulator adapts its `ChargePoint` to that
    context (#1059).
+
+### Host seams added for non-Bun hosts (#1126)
+
+The k6 load-test export ([`export-k6`](../entities/cli.md#export-k6)) runs the real
+`ChargePoint` inside k6's JavaScript engine, which has no global `WebSocket`
+with Bun's `{ protocols, headers }` constructor, no `ws` module and no `process`.
+Five small, behaviour-preserving seams let such a host plug in without patching
+globals; the golden-wire suite is unchanged. Each one lands next to the
+extraction issue it prepares:
+
+| Seam                                                                                                                            | What it does                                                                                                                                                                                                                       | Maps to            |
+| ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `setOcppWebSocketConstructor(ctor \| null)` (`transport/wsUrlWithBasic.ts`) and `WS_READY_STATE` (`transport/ws/readyState.ts`) | `openOcppWebSocket` calls the installed constructor like Bun's client (`new Ctor(url, { protocols, headers })`) and skips the Node `ws` fallback; the transport reads `OPEN` / `CONNECTING` from the constant, not from the global | #1057              |
+| `ChargePoint.onWireFrame(listener)` / socket `observers` events `frameSent`, `frameReceived`                                    | Sent and received text frames, as the socket writes and reads them (after the network simulation); a host counts frames without enabling INFO logging and parsing `Sent:` lines                                                    | #1055              |
+| `setLoggerConsole(sink)` and `Logger.setMaxEntries(n)` (`shared/Logger.ts`)                                                     | The console line goes to the installed sink (k6 prints every console call); the entry list is unbounded by default, bounded or disabled (`0`) for a headless station                                                               | #1055 (log format) |
+| `createChargePoint(..., services)`                                                                                              | Replaces any of the default service factories (the `ChargePointDeps` seam of #575)                                                                                                                                                 | #575               |
+| `createHeadlessServices()` (`infrastructure/charge-point/`)                                                                     | Opt-in no-op operational timeline and state history for headless load profiles (about 7 % of a connected station's heap); never the default                                                                                        | -                  |
+
+Also in this change: the station context is shared by prototype
+(`ChargePointCollaborators.ts`, `inheritCtx`) instead of spread into each of the
+~15 collaborators, which saves about 0.07 MB per charge point in a many-station
+process. Nothing observable changes.
 
 ## `packages/ocpp-rpc`
 

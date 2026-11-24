@@ -68,9 +68,10 @@ async function attempt(port: number) {
 }
 
 /**
- * Bun's own client already refuses a missing or foreign selection (1002,
- * "Mismatch client protocol"), a browser accepts a missing one, so the check
- * is driven through a stand-in `WebSocket` that opens with a chosen protocol.
+ * Real clients refuse some selections before `onopen` (browsers fail the
+ * handshake on a missing or foreign one, Bun closes 1002 "Mismatch client
+ * protocol" on a foreign one), so the post-open check is driven through a
+ * stand-in `WebSocket` that opens with a chosen protocol.
  */
 class FakeWebSocket extends EventTarget {
   static selected = "";

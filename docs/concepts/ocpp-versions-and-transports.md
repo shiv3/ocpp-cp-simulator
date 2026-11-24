@@ -41,7 +41,7 @@ related:
   - operational-timeline.md
   - expert-ocpp-calls.md
   - variable-monitoring.md
-updated: 2026-11-24
+updated: 2026-11-25
 ---
 
 # OCPP versions and transports
@@ -232,7 +232,9 @@ is corrected.
 
 The station offers `Sec-WebSocket-Protocol` (`ocpp1.6`, `ocpp2.0.1` or `ocpp2.1` for the configured version, plus any `--ws-subprotocol` extras; `transport.ws.subprotocols` replaces the list). When the WebSocket opens, the simulator compares the subprotocol the server selected (`ws.protocol`) with that offered list, exactly and case-sensitively, before it reports the connection open.
 
-| Selected                                     | Offered list                  | Behavior                                                                                                                                                                                                                                                                                                                       |
+The check runs only on a socket that reaches `onopen`. The table below is that post-open behaviour; a client that fails the handshake itself never gets there (see [Handshake failures before `onopen`](#handshake-failures-before-onopen)).
+
+| Selected (socket reached `onopen`)           | Offered list                  | Behavior                                                                                                                                                                                                                                                                                                                       |
 | -------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | one of the offered names                     | non-empty                     | Unchanged: the connection opens.                                                                                                                                                                                                                                                                                               |
 | nothing (no `Sec-WebSocket-Protocol` header) | non-empty                     | An `[ERROR]` line `The CSMS selected no WebSocket subprotocol (offered: …); closing the connection`, then the socket is closed with code 1002 and reason `No matching WebSocket subprotocol`. `onopen` never fires and the attempt is a failed one, so the [reconnect policy](#reconnect-policy-and-retrybackoff-609) applies. |
@@ -241,7 +243,17 @@ The station offers `Sec-WebSocket-Protocol` (`ocpp1.6`, `ocpp2.0.1` or `ocpp2.1`
 
 **What the specification says.** OCPP-J Part 4 §3.1.2 (OCPP-J 1.6 §3.1.2 and Part 4 of 2.0.1 / 2.1) governs the `Sec-WebSocket-Protocol` negotiation. The Part 4 text is not in the offline specification set used for this wiki, so it is not quoted here; what the set does contain is the CSMS conformance test TC_B_58 (Part 6, 2.0.1 and 2.1): "OCPP-J imposes extra constraints on the WebSocket subprotocol, detailed in the following section 3.1.2", and the upgrade response "must contain the header Sec-Websocket-Protocol", formatted as `Sec-WebSocket-Protocol: ocpp<Selected OCPP version>`. The station-side rule is not spelled out in that set, so the simulator takes the conservative reading: a connection with no agreed OCPP version is not used, it is closed with the WebSocket protocol-error code (1002).
 
-Bun's client and the Node `ws` client already refuse some of these themselves (Bun: close 1002 `Mismatch client protocol` for a missing selection; `ws`: an error); browsers accept a missing selection, and Bun accepts a foreign one. This check makes the behavior the same on every runtime. Source: `ws/connectionOpener.ts`, `checkSelectedSubprotocol` in `profile/subprotocols.ts`.
+### Handshake failures before `onopen`
+
+Some clients refuse a bad selection during the opening handshake, before `onopen`. The post-open check never runs there, so none of the `[ERROR]` lines above is written and the simulator does not close with 1002 itself; the attempt still ends as a failed connection and the [reconnect policy](#reconnect-policy-and-retrybackoff-609) applies.
+
+| Client                   | No selection (offered non-empty)                                                                                                                                                                                                                                          | A name that was not offered                           |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| Browser (Local mode)     | Fails the handshake natively ([WHATWG WebSocket](https://websockets.spec.whatwg.org/) / Fetch "establish a WebSocket connection": an offered list and no `Sec-WebSocket-Protocol` in the response fails the connection); `onerror` + `onclose` 1006, `onopen` never fires | Fails the handshake natively, same way                |
+| Bun 1.3.14 (CLI, daemon) | **Accepted**: opens with `protocol` `""`; the post-open check closes it                                                                                                                                                                                                   | Refused by Bun: close 1002 `Mismatch client protocol` |
+| Node 22 + `ws`           | Refused by `ws` with an error before open                                                                                                                                                                                                                                 | Refused by `ws` with an error before open             |
+
+So the check is what catches a missing selection on Bun, and it is a second line of defence for clients and test doubles that open anyway. It does not make the diagnostics identical across runtimes: on a native handshake failure the log shows the client's own error, not the simulator's. Source: `ws/connectionOpener.ts`, `checkSelectedSubprotocol` in `profile/subprotocols.ts`.
 
 ## WebSocket ping (`WebSocketPingInterval`)
 

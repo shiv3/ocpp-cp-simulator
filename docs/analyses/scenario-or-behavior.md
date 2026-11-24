@@ -46,7 +46,7 @@ state that a graph does not express, or something that must hold for the station
 | Physical sequence (plug, authorize, charge)                          | no                          | nodes                                                                    | `main` with the physical verbs                     |
 | Pause, step, resume, verdicts; fleet declaration                     | no                          | yes                                                                      | no                                                 |
 | Load through the control plane / MCP                                 | yes                         | yes (data)                                                               | no: files on the command line, selected by id      |
-| k6                                                                   | partly                      | refused nodes are listed                                                 | partly, `replace` only, refused members listed     |
+| k6 (`export-k6`)                                                     | yes (same engine, #1126)    | yes                                                                      | yes (loaded as on the daemon), 1.6J only           |
 | SOAP                                                                 | yes                         | `replace` fails when the node arms                                       | `beforeSend` refused; defaults bypass the gate     |
 
 Three rules of thumb. If the answer is `{ status: "…" }` and once is enough, use `responseOverride`. If a person

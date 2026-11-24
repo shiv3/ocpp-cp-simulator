@@ -14,9 +14,10 @@ related:
   - ../concepts/control-plane.md
   - ../entities/daemon.md
   - choosing-an-interface.md
+  - distributed-load-tests-k6-operator.md
   - ../sources/github-issues.md
   - ../sources/bench-readme.md
-updated: 2026-11-15
+updated: 2026-11-24
 ---
 
 # Fleet, load and observability roadmap
@@ -46,25 +47,25 @@ runtime model.
 
 ## Status at a glance
 
-| #   | Phase                                                        | Size | Depends on | Status              | Issue      |
-| --- | ------------------------------------------------------------ | ---- | ---------- | ------------------- | ---------- |
-| 1a  | [Bulk CP creation](#1a-bulk-cp-creation)                     | S    | —          | shipped             | #295       |
-| 1b  | [Multiple supervision URLs](#1b-multiple-supervision-urls)   | S    | —          | shipped             | #296       |
-| 1c  | [CP blueprints](#1c-cp-blueprints)                           | M    | 1a         | shipped             | #297       |
-| 1d  | [Built-in vendor blueprints](#1d-built-in-vendor-blueprints) | S    | 1c         | shipped             | #297       |
-| 2   | [Metrics endpoint](#phase-2--metrics-endpoint)               | M    | —          | shipped             | #298       |
-| 3a  | [idTag pool](#3a-idtag-pool)                                 | S    | —          | shipped             | #299       |
-| 3b  | [Seeded background traffic](#3b-seeded-background-traffic)   | M    | 3a         | shipped             | #300       |
-| 4a  | [Charging-curve EV model](#4a-charging-curve-ev-model)       | L    | —          | shipped             | #301       |
-| 4b  | [Signed meter values](#4b-signed-meter-values-optional)      | M    | —          | shipped             | #315       |
-| 5a  | [Measured scale ceiling](#5a-measured-scale-ceiling)         | S    | 1a, 2      | shipped             | #302       |
-| 5b  | [Worker model](#5b-worker-model-conditional)                 | L    | 5a         | under consideration | #302, #626 |
-| 6   | [File hot-reload](#phase-6--file-hot-reload)                 | S    | 1c, 3a     | shipped             | #314       |
+| #   | Phase                                                        | Size | Depends on | Status      | Issue             |
+| --- | ------------------------------------------------------------ | ---- | ---------- | ----------- | ----------------- |
+| 1a  | [Bulk CP creation](#1a-bulk-cp-creation)                     | S    | —          | shipped     | #295              |
+| 1b  | [Multiple supervision URLs](#1b-multiple-supervision-urls)   | S    | —          | shipped     | #296              |
+| 1c  | [CP blueprints](#1c-cp-blueprints)                           | M    | 1a         | shipped     | #297              |
+| 1d  | [Built-in vendor blueprints](#1d-built-in-vendor-blueprints) | S    | 1c         | shipped     | #297              |
+| 2   | [Metrics endpoint](#phase-2--metrics-endpoint)               | M    | —          | shipped     | #298              |
+| 3a  | [idTag pool](#3a-idtag-pool)                                 | S    | —          | shipped     | #299              |
+| 3b  | [Seeded background traffic](#3b-seeded-background-traffic)   | M    | 3a         | shipped     | #300              |
+| 4a  | [Charging-curve EV model](#4a-charging-curve-ev-model)       | L    | —          | shipped     | #301              |
+| 4b  | [Signed meter values](#4b-signed-meter-values-optional)      | M    | —          | shipped     | #315              |
+| 5a  | [Measured scale ceiling](#5a-measured-scale-ceiling)         | S    | 1a, 2      | shipped     | #302              |
+| 5b  | [Worker model](#5b-worker-model-conditional)                 | L    | 5a         | not pursued | #302, #626, #1126 |
+| 6   | [File hot-reload](#phase-6--file-hot-reload)                 | S    | 1c, 3a     | shipped     | #314              |
 
 One item was deliberately not unconditional. **5b** was gated on the number
 that **5a** produces — building a worker model before knowing where the single
-event loop actually breaks is speculative. 5a produced it (#626); whether to build 5b is
-under consideration in a separate issue (see the follow-up issue), and
+event loop actually breaks is speculative. 5a produced it (#626); 5b is **not pursued**: scale-out is
+k6 run distributed ([#1126](https://github.com/shiv3/ocpp-cp-simulator/issues/1126)), and
 [5b](#5b-worker-model-conditional) records what the number does and does not show. **4b** was optional for the same
 kind of reason (it serves only CSMS implementations that validate German
 calibration-law (Eichrecht) meter data) and shipped once that use was asked
@@ -401,9 +402,10 @@ section](../concepts/scenario-format.md#charging-curve-v12).)
 [scenario format](../concepts/scenario-format.md) — which needs a **schema
 version bump and a changelog entry** — `packages/core/schema/scenario.schema.json`,
 [state persistence](../concepts/state-persistence.md), the browser EV settings
-UI, and `EvSettingsJson` in `packages/k6-runtime/src/types.ts`. Decide up
+UI, and `EvSettingsJson` in the k6 runtime's types. Decide up
 front: **the k6 export ignores the curve in v1** and keeps its flat rate,
-rather than porting the model into the k6 runtime.
+rather than porting the model into the k6 runtime. (Superseded by #1126: the
+export now runs the real engine, so it models the curve like the simulator.)
 
 (As shipped: the browser EV settings UI landed too —
 `apps/web/src/components/Settings.tsx`'s "Default EV Settings" panel and the
@@ -488,7 +490,12 @@ writes through the main thread), and keeping the event stream ordered per CP.
 daemon, which is the argument against building this phase; the maintainer keeps
 the question open (see the follow-up issue).
 
-**Status (#626, 2026-11-08): under consideration, not built.** The worker
+**Status (#1126, 2026-11-24): not pursued; scale-out goes through k6.** `export-k6` now runs this engine itself in k6
+and k6 runs distributed (the k6 operator), so more load than one daemon holds comes from more processes rather than a
+worker model inside the daemon: see [Distributed load tests with the k6
+operator](distributed-load-tests-k6-operator.md). The notes below are the record of #626.
+
+**Earlier status (#626, 2026-11-08): under consideration, not built.** The worker
 model is being considered in a separate issue (see the follow-up issue). What
 the measurement shows, with **OCPP 1.6J** only: the number is above what this
 project's own CI and conformance runs ask for (the e2e suites create one to a

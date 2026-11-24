@@ -243,7 +243,7 @@ A node with no `mode` is the original one-shot `{ status }` override. `mode` (#1
 `callError`, `callResult`, `raw`, `callResultError`, `delay` and `noAnswer`, with the fields the mode needs;
 `times` / `persistent` repeat it. The modes are described under
 [response override modes](call-precedence.md#response-override-modes). The schema only requires `action`: a mode missing its
-field fails when the node runs. The k6 export knows only the `{ status }` form. The console form of the node edits `status`
+field fails when the node runs. The console form of the node edits `status`
 only; the other fields are written in the scenario JSON.
 
 ### `inboundPolicy` and certificate quirks notes
@@ -340,8 +340,8 @@ the next CALL of the action is the station's again; a loop that reaches the node
 | `callResponse` without an exchange | Fails the run (also when the CALL of its branch is already answered)                                |
 | SOAP station                       | `behavior: "replace"` fails the run when the node arms; it never falls back to the default behavior |
 
-`export-k6` refuses `behavior: "replace"`, `onBusy`, `callResponse`, `useBehavior` (with or without `params` or
-`mode`) and a `$from` payload with a clear error: the k6 runtime always lets the station answer.
+`export-k6` exports all of these: the k6 bundle runs the same engine (since #1126, which removed the hand-written k6
+runtime that refused them).
 
 **Who wins when several things want the CALL.** A running scenario's `replace` rule wins over code behaviors,
 whatever their order of loading; among scenarios the newest run wins, and a response override or an inbound
@@ -394,9 +394,7 @@ returns a `Preparing` or `Finishing` connector to `Available` and leaves any
 other status alone. The full matrix is in
 [Charging sessions](charging-sessions.md#ev-side-disconnect-and-connection-loss).
 
-The exported k6 runtime keeps no configuration: its plug-in sends
-StatusNotification `Preparing` and its plug-out `Available`, with or without a
-transaction, and only its `transaction` stop node sends StopTransaction.
+The k6 export runs the same engine, so a plug-out behaves as above there too.
 
 ### `connectionTrigger` notes
 
@@ -486,7 +484,7 @@ takes an array, got …`). `validateScenarioGraph` warns first: `unknownMatcher`
 - A matcher answers yes or no; it never produces a value, so it stays inside [what the format will not
   do](#what-the-format-will-not-do). The editor shows a `$match` case as a short read-only chip (`in
 Blocked|Invalid|Expired`, `≥ 80`, `missing`) and keeps it unchanged when you edit the rest; edit the operators in
-  the JSON file for now. `export-k6` already refuses a `switch`, so matchers need no extra rule.
+  the JSON file for now. `export-k6` runs a `switch` like the simulator does, so matchers need no extra rule.
 
 ```json
 {
@@ -525,13 +523,12 @@ any station-initiated CALL of the station's OCPP-J version (`action`), with
   `{}` — and the editor flags it; the run then fails on that step.
 - `notification` is not an alternative: in the simulator it knows only
   `Heartbeat` and `StatusNotification` (and reads only `payload.status` of the
-  latter). `export-k6` sends both nodes as authored and, for `ocppCall`,
-  carries on after a CALLERROR too.
+  latter). `export-k6` runs them like the simulator.
 
 **Issue #1096**: `messageType: "send"` sends an OCPP 2.1 SEND (RPC message type 6, e.g. `NotifyPeriodicEventStream`;
 see [SEND messages](expert-ocpp-calls.md#send-messages-ocpp-21)) instead of a CALL. A SEND is unconfirmed, so the node
 waits for nothing, records no `response` for `$from`, and `applyResponse` does not apply; the schema check and
-`skipValidation` do. A station that is not 2.1 refuses it and fails the run. `export-k6` refuses the node.
+`skipValidation` do. A station that is not 2.1 refuses it and fails the run, which an `export-k6` run (OCPP 1.6J only) does too.
 
 ### Controls on a parked wait
 
@@ -1313,8 +1310,8 @@ field it carried — `curvePoint` is `additionalProperties: true`, so a point ma
 hold metadata, and a read-back must not lose it from the corrected points only. The register then **plateaus** where
 the curve descends: energy already delivered is never un-delivered. The
 correction clamps rather than drops, so the curve's time span — which
-`autoCalculateInterval` divides into a tick interval, and which the exported
-k6 runtime reads as the auto-meter's stop condition — survives intact.
+`autoCalculateInterval` divides into a tick interval, and which the auto-meter
+reads as its stop condition — survives intact.
 
 That normalization sits on `Connector`'s `autoMeterValueConfig` setter, the
 one boundary every path that can configure an auto-meter funnels through:
@@ -1350,8 +1347,8 @@ for, and the correction is the runtime's.
 The one caller that treats a schema failure as fatal is `export-k6`, which is
 a build step rather than a load: `ocpp-cp-sim export-k6` on a scenario with a
 descending curve exits with the diagnostic above and writes nothing, so the
-generated k6 script — which carries no normalizer of its own — can never be
-handed a trajectory that runs the register backwards.
+generated k6 export can never be handed a trajectory that runs the register
+backwards.
 
 The
 register is integer watt-hours — a fractional `meterStop` is rejected by a
@@ -1389,17 +1386,11 @@ in the JSON schema with no minimum, and the curve editor's time input has no
 `min` either, so such a curve is legal and reachable. Points `(-10s, 5 kWh)`
 and `(10s, 15 kWh)` read 10 kWh at session start, so ten seconds in they have
 delivered 5 kWh, not the 10 that baselining at the earliest point would claim.
-The [k6 export](../entities/cli.md#what-the-exported-runtime-models) baselines
-identically, and since #329 draws the same shape _between_ the points too: both
-runtimes evaluate one module,
-[`packages/k6-runtime/src/curve.ts`](../../packages/k6-runtime/src/curve.ts),
-which the export bundle copies verbatim. The export previously interpolated
-piecewise-linearly, so a regenerated bundle **can** send different MeterValues
-for a curve with three or more control points — it does unless the Bezier and
-the polyline coincide, which they do when the control points are evenly spaced
-on a straight line (a plain `(0,0) (10,10) (20,20)` ramp) or all carry the same
-value. Collinearity alone is not enough: `(0,0) (5,5) (20,20)` is collinear,
-unevenly spaced, and differs by 2.5 kWh at its widest.
+The [k6 export](../entities/cli.md#export-k6) baselines identically, and since #329 draws the same shape _between_
+the points too: since #1126 it runs this very engine, and the curve evaluation lives in one module,
+[`packages/core/src/cp/domain/connector/meterCurve.ts`](../../packages/core/src/cp/domain/connector/meterCurve.ts).
+(Before #329 the export interpolated piecewise-linearly, which differs from the Bezier by up to 2.5 kWh on the uneven
+`(0,0) (5,5) (20,20)` ramp.)
 
 `Power.Offered` / `Current.Offered` are the EVSE's own offer —
 `min(maxChargingPowerKw, charger cap, ChargingScheduleResolver limit)` — **not** what the
@@ -1642,8 +1633,7 @@ same as before.
   param can be, and the same holds on every surface that takes params (`--behavior-params`, `cp.behaviors.set`,
   `cp.create`, MCP).
 
-`export-k6` refuses `useBehavior` with `params` or `mode` (the whole node is refused: the k6 runtime has no
-station behavior engine to hand them to).
+`export-k6` runs `useBehavior` with `params` and `mode` like the simulator does (the k6 bundle is the same engine).
 
 ```json
 {
@@ -1732,7 +1722,7 @@ Without a handle the node would end its branch (#822 review).
 is longer, so `delaySeconds` stays the required floor (use `0`) and an instant that has passed adds nothing. An
 `until` that is not a date fails the run. `jitterSeconds` (a number of at least 0) adds a draw from 0 to
 `jitterSeconds`, in whole milliseconds, from the scenario's seeded stream: the same seed gives the same wait, and
-`0` draws nothing. `export-k6` refuses both (the k6 runtime waits for `delaySeconds` only).
+`0` draws nothing. `export-k6` runs both (a seeded stream per charge point, `SEED`).
 
 ### Timeout edges (schema 1.8)
 
@@ -1776,7 +1766,7 @@ instead. It is an edge with `kind: "timeout"`:
 - **Older files.** No semantics depends on `schemaVersion`: an edge without
   `kind: "timeout"` is ordinary in every version, and a timeout edge works in
   a file of any declared version (the validator says `newerConstruct`).
-  `export-k6` refuses a scenario with a timeout edge, naming it.
+  `export-k6` runs a timeout edge like the simulator.
 
 The `delay` node and the auto-meter wait of a `meterValue` are not trigger
 waits and take no timeout edge.
@@ -1836,7 +1826,7 @@ The InternalError a cancelled or arriving branch sends is a CALLERROR with
 the branch / reached a join / forked the branch at a parallel before it
 answered this call" — the error a run end sends for a CALL still open.
 Silence on purpose is still `callResponse` `kind: "none"` before the join.
-`export-k6` refuses both node types. The console editor does not offer them
+`export-k6` runs both node types. The console editor does not offer them
 yet: they are kept out of `ScenarioNodeType` (as `ScenarioFlowNodeType`) and
 reach a run through a file.
 
@@ -1886,7 +1876,7 @@ that edge an exit, built like conditional branching:
   counts from when that branch's walk began. After a restart a loop therefore runs its full bounds again. Resuming
   at the loop's source node itself treats that node as done and goes on along its ordinary edges (the loop edge is
   not followed).
-- **Not for k6.** `export-k6` refuses a scenario with a loop edge, naming it.
+- **k6.** `export-k6` runs loop edges like the simulator (same engine, #1126).
 - **In the editor.** The web console's Steps and Graph views draw a loop edge as a Repeat block whose header
   says its bounds ("Repeat 10 times / for 2 h / until … (whichever first)") and edits them inline, `until`
   with the switch step's value field and case list; a Repeat added in the middle of a lane is a loop edge with
@@ -1906,7 +1896,7 @@ things below is answered with "write a behavior and select it with `useBehavior`
 | The format will not…                                              | Because                                                                                               |
 | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
 | do arithmetic                                                     | A value computed from another is a program; a constant is a param.                                    |
-| build strings (`${cpId}-${requestId}.log`)                        | Templating is a language, and the k6 export would fork on it.                                         |
+| build strings (`${cpId}-${requestId}.log`)                        | Templating is a language, and every runtime would have to implement it.                               |
 | iterate over connectors or other collections                      | A scenario is bound to one connector; looping over a collection is code.                              |
 | define fragments with arguments (sub-flows, functions)            | Arguments make a call graph.                                                                          |
 | read host services outside the `$from` roots                      | The roots are the contract between a run and the station.                                             |
@@ -1948,7 +1938,7 @@ event handlers between branches (the run's `setState` state was already shared).
   its source after each round (do-while) until a bound is satisfied, then the branch goes on along the source's
   ordinary edge. `until` reads `value` / `cases` exactly like a `switch`. Counters are per branch. The graph
   validator gains `loopEdgeIgnored`, `extraLoopEdge`, `invalidLoop`, `busyLoop`, `loopWithoutExit` and
-  `newerConstruct`; `export-k6` refuses loop edges. Purely additive — an edge without the field means what it
+  `newerConstruct`. Purely additive — an edge without the field means what it
   always meant, and `1.7` and older files remain valid. See [the note](#loop-edges-schema-110).
 
 - **v1.9**: Adds the `parallel` and `join` node types (`join` `mode`:

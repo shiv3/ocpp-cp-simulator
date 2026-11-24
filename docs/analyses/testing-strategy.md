@@ -309,8 +309,9 @@ effect hash), once with another (different hash), with a control on unseeded str
 hash for a small fleet. The result and its limits are in the
 [Charger engine](../concepts/charger-engine.md#determinism). The same fleet (`virtualFleet.ts`) runs in real Chromium
 through `scripts/verify/browser/run.ts` (Playwright is not a dependency; the script says how to supply it) and must hash
-identically to Bun; the k6 host is run for real with a k6 binary against `scripts/verify/fakeCsms16.ts`. Both are
-manual verifications, not part of `bun run test`: [Verification results](charger-engine-migration.md#verification-results).
+identically to Bun; the k6 export is run for real with a pinned k6 binary against `scripts/verify/fakeCsms16.ts` in CI
+(`scripts/verify/k6/smoke.ts`, the `k6-export` job, #1126). The browser run is a manual verification, not part of
+`bun run test`: [Verification results](charger-engine-migration.md#verification-results).
 
 ## Behavior tests
 
@@ -332,7 +333,7 @@ one jump; the memory transport has no such limit.
 `packages/core/src/cp/application/`.
 
 The tests of loading code are `apps/cli/src/__tests__/behavior.bun.test.ts` (flags, loader, `behavior build`
-including the k6 refusals), `behaviorCodeIsNotRemote.bun.test.ts` (code-like `load_scenario` data stays data),
+including the syntax checks that keep a behavior loadable on k6), `behaviorCodeIsNotRemote.bun.test.ts` (code-like `load_scenario` data stays data),
 `scripts/__tests__/behaviorEslint.bun.test.ts` (the ESLint config), `service.engineStatePersistence.bun.test.ts`
 and the template's own `examples/behaviors/flaky-firmware.bun.test.ts` (same seed, same frames).
 
@@ -342,8 +343,8 @@ The tests of stage E (hooks, send interception, assignment, reload) are, in `pac
 path, 2.x aliases, SOAP refusal), `reload.bun.test.ts` (`replaceBehavior`: in-flight exchange, `ctx.state`, grace
 time) and `responseHelpers.bun.test.ts` (`ctx.accepted` / `ctx.rejected`); in `apps/cli`, `behaviorLibrary.bun.test.ts`
 (select, reload, fresh temporary imports) and `server/__tests__/behaviorAssignment.bun.test.ts` (the control-plane
-methods, persistence, and that no code or path is accepted); `behaviorHost.test.ts` and `behaviorExport.bun.test.ts`
-for the k6 host and its refusals. `scripts/verify/e2e/behaviorsDaemon.ts` drives the real daemon end to end.
+methods, persistence, and that no code or path is accepted); `exportK6.bun.test.ts` and `packages/k6-host/src/__tests__/`
+for the k6 export (the engine bundle, ids across execution segments, the frame meter). `scripts/verify/e2e/behaviorsDaemon.ts` drives the real daemon end to end.
 
 The tests of the scenario 1.5 features are `scenario15.bun.test.ts` (one test per row of the runtime
 contract in the [Charger engine](../concepts/charger-engine.md#scenario-schema-15)) and

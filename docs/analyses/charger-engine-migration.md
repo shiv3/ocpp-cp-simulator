@@ -17,9 +17,8 @@ sources:
   - packages/core/src/cp/application/scenario/nodes/calls.ts
   - packages/core/src/cp/application/scenario/nodes/transaction.ts
   - packages/core/src/cp/application/scenario/nodes/triggers.ts
-  - packages/k6-runtime/src/interpreter.ts
-  - packages/k6-runtime/src/behaviorHost.ts
-  - apps/cli/src/exportK6/runExportK6Behavior.ts
+  - apps/cli/src/exportK6/buildBehaviors.ts
+  - packages/k6-host/src/charger.ts
   - scripts/verify/browser/run.ts
   - scripts/bench/engineScale.ts
   - "issues #566, #569, #575, #600, #618"
@@ -32,10 +31,16 @@ related:
   - ../concepts/scenario-format.md
   - ../entities/cli.md
   - ../sources/bench-readme.md
-updated: 2026-11-15
+updated: 2026-11-24
 ---
 
 # Charger engine: migration history
+
+> **Superseded in part (#1126, 2026-11-24).** This page records the migration as it happened, including a hand-written
+> k6 runtime and k6 behavior host (`packages/k6-runtime`) and the lists of what `export-k6` refused. That runtime is
+> deleted: `export-k6` now bundles the real engine for k6 ([CLI → export-k6](../entities/cli.md#export-k6)), so every
+> refusal and every "the k6 host does not provide" statement below is history, and the k6 verification rows below
+> describe the removed host.
 
 This page is the record of how the [charger engine](../concepts/charger-engine.md) was built: the problem, the stages, the decisions
 each stage took where the design left a choice, the measurements, and the reviews. It is history, ordered by stage. The

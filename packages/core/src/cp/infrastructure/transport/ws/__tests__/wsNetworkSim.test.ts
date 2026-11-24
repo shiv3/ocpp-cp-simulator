@@ -71,6 +71,29 @@ describe.each(VERSIONS)("dispatchIncomingFrame on %s", (version, code) => {
     const { intercepted } = dispatch('[2,"m1","Reset"]', version);
     expect(intercepted).toEqual([[2, "m1", "Reset"]]);
   });
+
+  it("logs an interceptor that throws and does not let it escape", () => {
+    const logger = new Logger(LogLevel.ERROR);
+    const replies: string[] = [];
+    const handled: unknown[][] = [];
+    expect(() =>
+      dispatchIncomingFrame('[2,"m1","Reset",{}]', {
+        logger,
+        ocppVersion: version,
+        intercept: () => {
+          throw new Error("interceptor broke");
+        },
+        handler: () => (type, id, action, payload) =>
+          handled.push([type, id, action, payload]),
+        reply: (frame) => replies.push(frame),
+      }),
+    ).not.toThrow();
+    expect(logger.getLogs().join("\n")).toContain(
+      "Error parsing message: Error: interceptor broke",
+    );
+    expect(replies).toEqual([]);
+    expect(handled).toEqual([]);
+  });
 });
 
 describe("dispatchIncomingFrame and the OCPP 2.1 message types", () => {

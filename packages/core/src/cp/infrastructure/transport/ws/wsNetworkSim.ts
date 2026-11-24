@@ -86,10 +86,18 @@ export function dispatchIncomingFrame(
   if (
     Array.isArray(messageArray) &&
     messageArray.length >= 3 &&
-    messageArray.length <= 5 &&
-    ctx.intercept(messageArray)
-  )
-    return;
+    messageArray.length <= 5
+  ) {
+    let consumed: boolean;
+    try {
+      consumed = ctx.intercept(messageArray);
+    } catch (error) {
+      // A throwing interceptor must not escape into the socket's onmessage.
+      ctx.logger.error(`Error parsing message: ${error}`, LogType.WEBSOCKET);
+      return;
+    }
+    if (consumed) return;
+  }
 
   const dialect = rpcDialectOf(ctx.ocppVersion);
   const decoded = decodeParsedFrame(messageArray, raw, {

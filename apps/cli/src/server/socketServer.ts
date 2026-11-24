@@ -105,6 +105,7 @@ import {
   clearLogs,
   resetState,
 } from "./rpc/cpRpcs";
+import { probeCp } from "./rpc/cpProbe";
 import type { CPRegistry } from "./CPRegistry";
 import type { EventBus } from "./eventBus";
 import { getGlobalMetricsRecorder } from "./metrics/MetricsRecorder";
@@ -496,6 +497,8 @@ export async function dispatchRpcCore(
       return listCps(deps.chargePointService, call.params);
     case "cp.create":
       return createCp(deps, call.params);
+    case "cp.probe":
+      return probeCp(deps, call.params);
     case "cp.create_many":
       return createManyCps(deps, call.params);
     case "blueprint.list":
@@ -644,10 +647,6 @@ export async function dispatchRpcCore(
     case "vehicle_catalog.get_variant":
       return getCatalogVariant(deps, call.params);
     case "events.subscribe":
-      throw new RpcFailure(
-        "not_found",
-        "events.subscribe/unsubscribe are only available over socket.io",
-      );
     case "events.unsubscribe":
       throw new RpcFailure(
         "not_found",

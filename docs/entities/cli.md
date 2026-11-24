@@ -40,7 +40,7 @@ related:
   - ../concepts/log-format.md
   - ../concepts/local-authorization.md
   - ../concepts/charger-engine.md
-updated: 2026-11-21
+updated: 2026-11-25
 ---
 
 # CLI (`ocpp-cp-sim`)
@@ -828,6 +828,38 @@ Limits, all consequences of only the charge point's clock being accelerated:
 detection over a [trace file](../concepts/trace-format.md) or a running
 daemon's stored logs and writes a Markdown / HTML report. It has its own page:
 [analyze](analyze.md).
+
+### cp probe
+
+`ocpp-cp-sim cp probe` checks whether a charge point with the given settings
+would get into the CSMS, before anything is created (#1132). It takes the
+connection flags of a local charge point — `--cp-id`, `--ws-url`,
+`--ocpp-version`, `--basic-auth-user` / `--basic-auth-pass`,
+`--security-profile`, `--authorization-key`, `--tls-ca` / `--tls-cert` /
+`--tls-key`, `--header`, `--ws-subprotocol` and the `--ws-*` handshake flags —
+opens one WebSocket handshake exactly as that charge point would, and closes
+it. No OCPP message is sent and nothing is created.
+
+```shell
+ocpp-cp-sim cp probe --cp-id CP001 --ws-url wss://csms.example.com/ocpp \
+  --security-profile 2 --authorization-key 0011…ff --json
+# {"ok":false,"code":"credentials_refused","stage":"upgrade","httpStatus":401,
+#  "url":"wss://csms.example.com/ocpp/CP001","message":"…","hint":"…",…}
+```
+
+- Without `--json` it prints `ok: <url> (subprotocol …)`, or `failed: <code> at
+<stage>` with the URL, message and hint, then any warnings (e.g. a URL that
+  already ends with the charge point id).
+- Exit status: **0** when the verdict is `ok`, **1** otherwise, including a
+  probe that could not run (bad flags, an unreachable daemon).
+- The budget is `--ws-handshake-timeout-ms` (default 8000).
+- `--http-url <url>` (with `--http-basic-auth-*`) runs the check on that daemon
+  instead, from its network, through the `cp.probe` RPC; TLS files are then
+  read on the daemon's host.
+- The SOAP versions have no WebSocket and are refused.
+
+The verdict fields and every `code` / `stage` are listed under
+[cp.probe](../concepts/control-plane.md#cpprobe--connection-check-before-creating-1132).
 
 ### Behavior code: `--behavior` and `behavior build`
 

@@ -1,4 +1,8 @@
-import type { EventEnvelope } from "@ocpp-cp-simulator/contracts/index";
+import type {
+  ConnectionProbeResult,
+  EventEnvelope,
+  Params,
+} from "@ocpp-cp-simulator/contracts/index";
 import { RemoteChargePointService } from "@ocpp-cp-simulator/client/remote/RemoteChargePointService";
 import { toJsonResponse } from "./output";
 import type { JsonCommand } from "./types";
@@ -83,6 +87,31 @@ export async function fetchStoredLogs(
       throw new Error("daemon returned a non-array result for logs.get");
     }
     return ack.result.filter(isSerializedLogLine);
+  } catch (err) {
+    throw new Error(formatSocketError(err, loc), { cause: err });
+  } finally {
+    service.dispose();
+  }
+}
+
+/**
+ * `cp.probe` on a running daemon (#1132): the check runs from the daemon's
+ * network. Throws when the daemon cannot be reached or refuses the params; a
+ * refused CSMS connection is the returned verdict.
+ */
+export async function probeViaDaemon(
+  loc: ClientLocation,
+  params: Params<"cp.probe">,
+): Promise<ConnectionProbeResult> {
+  const service = createRemoteService(loc);
+  try {
+    const ack = await service.runRawRpc("cp.probe", params);
+    if (!ack.ok) {
+      throw new Error(
+        `daemon rejected cp.probe: ${ack.error.message || ack.error.code}`,
+      );
+    }
+    return ack.result as ConnectionProbeResult;
   } catch (err) {
     throw new Error(formatSocketError(err, loc), { cause: err });
   } finally {

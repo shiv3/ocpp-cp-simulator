@@ -34,6 +34,7 @@ export {
 } from "./schemas/common";
 export {
   createParamsSchema,
+  cpProbeParamsSchema,
   createManyParamsSchema,
   hasIdPatternPlaceholder,
   MAX_GENERATED_CP_ID_LENGTH,
@@ -91,6 +92,7 @@ export const METHODS = {
 export const EXPLICIT_METHODS = [
   "cp.list",
   "cp.create",
+  "cp.probe",
   "cp.create_many",
   "blueprint.list",
   "blueprint.save",

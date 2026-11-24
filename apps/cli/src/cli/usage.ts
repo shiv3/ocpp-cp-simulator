@@ -311,6 +311,18 @@ Options:
                            connector's report and why.
   behavior build <file> [--out <file>]
                            Type-check a behavior and bundle it (ES2017, k6/* external).
+  cp probe --cp-id <id> --ws-url <url> [connection options] [--json]
+          [--http-url <url>]
+                           One-shot connection check (#1132): open one
+                           WebSocket handshake exactly as the charge point
+                           would (id appended, subprotocol, Basic Auth /
+                           security profile, TLS, --ws-* and --header), then
+                           close it. No OCPP message is sent, nothing is
+                           created. Prints the verdict (--json: one JSON
+                           object with ok, code, stage, url, message, hint);
+                           exits 1 unless ok. The budget is
+                           --ws-handshake-timeout-ms (default 8000).
+                           --http-url runs it on that daemon (cp.probe).
   export-k6 (--scenario <file.json> | --behavior <file>...) [-o <dir>] [--ocpp-version 1.6] [--force]
                            Export a scenario, or behavior code (OCPP 1.6J),
                            as a runnable k6 load-test bundle (entry script +

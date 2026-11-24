@@ -26,6 +26,7 @@ import type { ClientLocation } from "./client";
 import { loadFleetTemplateFiles } from "./server/fleetTemplateFiles";
 import type { FleetTemplate } from "@ocpp-cp-simulator/contracts/index";
 import { parseArgs } from "./cli/parseArgs";
+import { runCpProbeCommand } from "./cli/cpProbeCommand";
 import {
   vehicleCatalogConfigOrExit,
   resolveCorsPolicy,
@@ -92,6 +93,12 @@ async function main(): Promise<void> {
     }
     process.stdout.write(`${result.outFile}\n`);
     process.exit(0);
+  }
+
+  // `cp probe` (#1132), a subcommand like `export-k6`: one handshake, no
+  // charge point, no server.
+  if (process.argv[2] === "cp" && process.argv[3] === "probe") {
+    process.exit(await runCpProbeCommand(process.argv.slice(4)));
   }
 
   const options = parseArgs(process.argv);

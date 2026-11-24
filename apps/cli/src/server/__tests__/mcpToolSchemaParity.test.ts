@@ -300,6 +300,7 @@ describe("MCP curated tool schema parity (general, #299)", () => {
   //     from.
   const oneToOneCases: ReadonlyArray<{ tool: string; method: RpcMethod }> = [
     { tool: "cp_list", method: "cp.list" },
+    { tool: "cp_probe", method: "cp.probe" },
     { tool: "blueprint_list", method: "blueprint.list" },
     { tool: "blueprint_save", method: "blueprint.save" },
     { tool: "fleet_template_list", method: "fleet.template.list" },

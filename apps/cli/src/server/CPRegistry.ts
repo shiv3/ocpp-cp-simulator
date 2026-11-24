@@ -133,7 +133,7 @@ export class CPRegistry {
     /** Shared daemon DB threaded into every CLIChargePointService we
      *  create. `null` keeps everything in-memory (no `--state-db`). */
     private readonly database: Database | null = null,
-    private readonly options: CPRegistryOptions = {},
+    readonly options: CPRegistryOptions = {},
     /**
      * Optional so every existing caller keeps working; when present, a
      * restored charge point resumes the background traffic it was configured

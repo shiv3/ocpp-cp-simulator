@@ -6,6 +6,7 @@ import {
   wireSimulatorConfigSchema,
 } from "../events";
 import { subscribeResultSchema } from "../envelope";
+import { connectionProbeResultSchema } from "../connectionProbe";
 import { labelsSchema } from "../labels";
 import { CHARGING_SESSION_OUTCOMES } from "../chargingSession";
 import { SCENARIO_RUN_EXECUTION_STATES, SCENARIO_VERDICTS } from "../scenario";
@@ -36,6 +37,7 @@ import {
   connectorSettingsParamsSchema,
   createParamsSchema,
   cpListParamsSchema,
+  cpProbeParamsSchema,
   cpLabelsSetParamsSchema,
   cpBehaviorsSetParamsSchema,
   behaviorListResultSchema,
@@ -62,6 +64,13 @@ export const DAEMON_METHODS = {
     result: ARRAY_1000(cpListItemSchema),
   },
   "cp.create": { params: createParamsSchema, result: ANY },
+  // #1132: one WebSocket handshake as the station would open it, then closed.
+  // No OCPP message is sent and nothing is created; a refused connection is
+  // the verdict (`ok: false`), not an error.
+  "cp.probe": {
+    params: cpProbeParamsSchema,
+    result: connectionProbeResultSchema,
+  },
   // Partial success is the result, not an error: one unreachable CSMS URL must
   // not roll back the charge points that came up fine, so failures are
   // reported per id instead of thrown.

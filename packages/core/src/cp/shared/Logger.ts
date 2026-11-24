@@ -1,3 +1,11 @@
+/** Where `Logger.log` writes its console line. A host that must not print per
+ *  line (a k6 load test: every console call is a log line on stdout) swaps it. */
+type ConsoleSink = Pick<Console, "debug" | "info" | "warn" | "error" | "log">;
+let consoleSink: ConsoleSink = console;
+export function setLoggerConsole(sink: ConsoleSink): void {
+  consoleSink = sink;
+}
+
 export enum LogLevel {
   DEBUG = 0,
   INFO = 1,
@@ -67,6 +75,8 @@ export function setGlobalLoggerCpId(cpId: string | null): void {
 export class Logger {
   private level: LogLevel;
   private logList: LogEntry[] = [];
+  /** Most entries `logList` keeps (oldest dropped first). Unbounded by default. */
+  private maxEntries = Number.POSITIVE_INFINITY;
   private enabledTypes: Set<LogType> = new Set(Object.values(LogType));
   private emitter: EventEmitter2;
   /** Per-instance override for the cpId rendered into JSON output.
@@ -106,6 +116,22 @@ export class Logger {
 
   setLevel(level: LogLevel): void {
     this.level = level;
+  }
+
+  /**
+   * Bound the in-memory entry list to the newest `max` entries; `0` keeps
+   * none (console line and `log` events still fire). Unbounded by default:
+   * the console reads the whole list. A headless host running many stations
+   * sets it so a long run does not grow without limit.
+   */
+  setMaxEntries(max: number): void {
+    this.maxEntries = Math.max(0, max);
+    this.trimEntries();
+  }
+
+  private trimEntries(): void {
+    const excess = this.logList.length - this.maxEntries;
+    if (excess > 0) this.logList.splice(0, excess);
   }
 
   /**
@@ -177,23 +203,26 @@ export class Logger {
     // Console output based on level
     switch (level) {
       case LogLevel.DEBUG:
-        console.debug(formattedMessage);
+        consoleSink.debug(formattedMessage);
         break;
       case LogLevel.INFO:
-        console.info(formattedMessage);
+        consoleSink.info(formattedMessage);
         break;
       case LogLevel.WARN:
-        console.warn(formattedMessage);
+        consoleSink.warn(formattedMessage);
         break;
       case LogLevel.ERROR:
-        console.error(formattedMessage);
+        consoleSink.error(formattedMessage);
         break;
       default:
-        console.log(formattedMessage);
+        consoleSink.log(formattedMessage);
         break;
     }
 
-    this.logList.push(logEntry);
+    if (this.maxEntries > 0) {
+      this.logList.push(logEntry);
+      this.trimEntries();
+    }
 
     // Emit event with EventEmitter2
     // Hierarchical event name: log.{LogType}.{LogLevel}

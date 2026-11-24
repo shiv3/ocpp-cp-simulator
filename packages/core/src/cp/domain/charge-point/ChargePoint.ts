@@ -52,6 +52,10 @@ import type {
   IChargePointMessageHandler,
 } from "../transport/IChargePointMessageHandler";
 import type { ChargePointSocket } from "../transport/ChargePointSocket";
+import {
+  observeWireFrames,
+  type WireFrameListener,
+} from "../transport/observeWireFrames";
 import type { RawFrameSink } from "../transport/RawFrameSink";
 import { CellularModem, type RedactedModemState } from "../modem/CellularModem";
 import { CellularLinkController } from "./CellularLinkController";
@@ -843,6 +847,11 @@ export class ChargePoint {
 
   get wsUrl(): string {
     return this._webSocket?.url ?? this._transportUrl;
+  }
+
+  /** @see observeWireFrames; the unsubscribe function. */
+  onWireFrame(listener: WireFrameListener): () => void {
+    return observeWireFrames(this._webSocket, listener);
   }
 
   get error(): string {

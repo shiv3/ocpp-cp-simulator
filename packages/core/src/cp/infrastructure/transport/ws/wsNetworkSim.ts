@@ -1,3 +1,4 @@
+import { WS_READY_STATE } from "./readyState";
 import type { Logger } from "../../../shared/Logger";
 import { LogType } from "../../../shared/Logger";
 import { OCPPAction } from "../../../domain/types/OcppTypes";
@@ -13,7 +14,7 @@ export function writeUpstreamPhysical(
   raw: string,
   logger: Logger,
 ): void {
-  if (!ws || ws.readyState !== WebSocket.OPEN) {
+  if (!ws || ws.readyState !== WS_READY_STATE.OPEN) {
     // A delayed frame can reach its release after the socket dropped. Throw
     // so the pipeline settles it `write_failed` instead of `written` — a
     // frame that never hit the wire must stay in its sender's custody

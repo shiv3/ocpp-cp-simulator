@@ -117,6 +117,8 @@ COPY scripts/tsconfig.json ./scripts/tsconfig.json
 COPY scripts/licenseNotices.ts ./scripts/licenseNotices.ts
 # `bun run build:cli:bun` writes the CLI bundle's notices with this (#870).
 COPY scripts/generate-cli-notices.ts ./scripts/generate-cli-notices.ts
+# ... and the k6 engine `export-k6` embeds (#1126).
+COPY scripts/generate-k6-engine.ts ./scripts/generate-k6-engine.ts
 COPY tailwind.config.js postcss.config.js ./
 COPY public ./public
 COPY packages ./packages

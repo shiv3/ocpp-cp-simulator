@@ -320,6 +320,39 @@ jobs:
           flags: bun
           fail_ci_if_error: false
 
+  # `export-k6` writes the simulator's real engine as a k6 bundle (#1126). The
+  # bundle runs on k6's own JavaScript engine, which lacks web globals core
+  # reads, so a new `URL`, `AbortSignal.any` or `fetch` in the hot path breaks
+  # it at run time and nowhere else. This job exports a bundled scenario, runs
+  # it on a pinned k6 against the mock CSMS and asserts what arrived: two k6
+  # instances on complementary execution segments, every charge point booted
+  # once and completed one cycle, no id used twice, k6's frame metrics equal to
+  # the CALLs the CSMS saw. Takes about 30 s of run time.
+  k6-export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .tool-versions
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+        env:
+          # @open-ocpp-trace/* is on GitHub Packages (bunfig.toml).
+          GITHUB_TOKEN: ${{ github.token }}
+
+      # A pinned release; the checksums file is pinned by hash, the archive is
+      # verified against it (scripts/verify/k6/install-k6.sh).
+      - name: Install k6
+        run: ./scripts/verify/k6/install-k6.sh "$RUNNER_TEMP/k6"
+
+      - name: Export a scenario and run it on k6 (two execution segments)
+        run: bun scripts/verify/k6/smoke.ts --k6 "$RUNNER_TEMP/k6/k6" --segments 2 --chargers 20 --chargers-per-vu 5
+
   # docker-publish.yml builds the image on pushes to `main` and on tags, not
   # on pull requests, so a change that breaks only the container build is
   # first seen after merge: a referenced tsconfig the `ui` stage did not copy

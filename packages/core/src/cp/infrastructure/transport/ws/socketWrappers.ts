@@ -27,7 +27,7 @@ interface NodeWsLike {
   close(code?: number, reason?: string): void;
   terminate(): void;
   readonly readyState: number;
-  /** The subprotocol the server agreed to; "" before the socket opens. */
+  /** The subprotocol the server selected ("" when none). */
   readonly protocol?: string;
   /** The TLS socket of a `wss://` connection, once it is open. */
   readonly _socket?: {
@@ -229,7 +229,7 @@ export class DeferredNodeWebSocket {
     return this.socket?.readyState ?? this.state;
   }
 
-  /** The agreed subprotocol, as the native client reports it (#1132). */
+  /** The subprotocol the server selected, "" until open or when none. */
   get protocol(): string {
     return this.socket?.protocol ?? "";
   }

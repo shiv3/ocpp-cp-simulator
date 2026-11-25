@@ -410,15 +410,134 @@ describe("RpcEndpoint timing and lifecycle", () => {
   });
 });
 
+// The rules: docs/analyses/ocpp-protocol-stack.md#malformed-frames.
+const MALFORMED_DIALECTS = [
+  ["1.6", OCPP16_RPC_DIALECT, "GenericError"],
+  ["2.0.1", OCPP2X_RPC_DIALECT, "RpcFrameworkError"],
+  ["2.1", OCPP21_RPC_DIALECT, "RpcFrameworkError"],
+] as const;
+
+/** Frames answered with the RPC framework error: reason, frame, the id the
+ *  answer carries and its description. */
+const ANSWERED: readonly (readonly [string, string, string, string])[] = [
+  ["not-json", "[2,", "-1", "Message is not valid JSON"],
+  ["not-json", "", "-1", "Message is not valid JSON"],
+  ["not-array", '{"a":1}', "-1", "Message is not a JSON array"],
+  ["not-array", '"x"', "-1", "Message is not a JSON array"],
+  ["invalid-message-type", "[]", "-1", "MessageTypeId could not be read"],
+  [
+    "invalid-message-type",
+    '["2","m1","Heartbeat",{}]',
+    "m1",
+    "MessageTypeId could not be read",
+  ],
+  [
+    "invalid-message-id",
+    '[2,7,"Heartbeat",{}]',
+    "-1",
+    "MessageId could not be read",
+  ],
+  [
+    "invalid-message-id",
+    '[2,"","Heartbeat",{}]',
+    "-1",
+    "MessageId could not be read",
+  ],
+  ["invalid-action", '[2,"m1",42,{}]', "m1", "Action could not be read"],
+  ["invalid-action", '[2,"m1","",{}]', "m1", "Action could not be read"],
+  [
+    "wrong-length",
+    '[2,"m1","Heartbeat"]',
+    "m1",
+    "CALL does not have 4 elements",
+  ],
+  [
+    "wrong-length",
+    '[2,"m1","Heartbeat",{},{}]',
+    "m1",
+    "CALL does not have 4 elements",
+  ],
+];
+
+/** Malformed frames no version answers: unknown message types (ignored) and
+ *  malformed answers (a CALLERROR only answers a CALL). */
+const UNANSWERED: readonly (readonly [string, string])[] = [
+  ["unknown-message-type", '[7,"m1","X",{}]'],
+  ["unknown-message-type", '[1,"m1",{}]'],
+  ["unknown-message-type", "[7,42]"],
+  ["unknown-message-type", '[2.5,"m1","Heartbeat",{}]'],
+  ["wrong-length", '[3,"m1",{},{}]'],
+  ["invalid-message-id", '[3,"",{}]'],
+  ["invalid-message-id", "[3,7,{}]"],
+  ["invalid-error", '[4,"m1",42,"no",{}]'],
+  ["wrong-length", '[4,"m1","GenericError"]'],
+];
+
 describe("RpcEndpoint malformed and unexpected frames", () => {
+  describe.each(MALFORMED_DIALECTS)("on %s", (_version, dialect, code) => {
+    it.each(ANSWERED)(
+      "answers %s %s with a CALLERROR",
+      (reason, raw, messageId, description) => {
+        const { cs } = pair(dialect);
+        cs.endpoint.receive(raw);
+        expect(cs.problems).toMatchObject([{ reason, raw }]);
+        expect(cs.sent).toEqual([
+          JSON.stringify([4, messageId, code, description, {}]),
+        ]);
+      },
+    );
+
+    it.each(UNANSWERED)(
+      "reports %s %s to onProtocolError and sends nothing",
+      (reason, raw) => {
+        const { cs } = pair(dialect);
+        cs.endpoint.receive(raw);
+        expect(cs.problems).toMatchObject([{ reason, raw }]);
+        expect(cs.sent).toEqual([]);
+      },
+    );
+  });
+
   it.each([
-    ["not-json", "[2,"],
-    ["unknown-message-type", '[6,"m1",{}]'],
-    ["wrong-length", '[2,"m1","Heartbeat"]'],
-  ])("reports %s to onProtocolError and sends nothing", (reason, raw) => {
+    ["invalid-action", '[6,"m1","",{}]'],
+    ["wrong-length", '[6,"m1","NotifyPeriodicEventStream"]'],
+    ["invalid-error", '[5,"m1","FormatViolation",7]'],
+    ["wrong-length", '[5,"m1","FormatViolation"]'],
+  ])(
+    "never answers a malformed 2.1 SEND or CALLRESULTERROR (%s %s)",
+    (reason, raw) => {
+      const { cs } = pair(OCPP21_RPC_DIALECT);
+      cs.endpoint.receive(raw);
+      expect(cs.problems).toMatchObject([{ reason, raw, messageId: "m1" }]);
+      expect(cs.sent).toEqual([]);
+    },
+  );
+
+  it("reports a reply it could not write after the malformed frame", () => {
+    const problems: RpcProtocolProblem[] = [];
+    const endpoint = new RpcEndpoint({
+      dialect: OCPP2X_RPC_DIALECT,
+      nextMessageId: () => "x",
+      send: () => {
+        throw new Error("socket closed");
+      },
+      onProtocolError: (problem) => problems.push(problem),
+    });
+    endpoint.receive("[2,");
+    expect(problems).toEqual([
+      { reason: "not-json", raw: "[2," },
+      {
+        reason: "reply-send-failed",
+        raw: '[4,"-1","RpcFrameworkError","Message is not valid JSON",{}]',
+        messageId: "-1",
+      },
+    ]);
+  });
+
+  it("does not answer a malformed frame after close()", () => {
     const { cs } = pair(OCPP16_RPC_DIALECT);
-    cs.endpoint.receive(raw);
-    expect(cs.problems).toMatchObject([{ reason, raw }]);
+    cs.endpoint.close();
+    cs.endpoint.receive("[2,");
     expect(cs.sent).toEqual([]);
   });
 

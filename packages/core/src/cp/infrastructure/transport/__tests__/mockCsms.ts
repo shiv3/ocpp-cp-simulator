@@ -55,6 +55,8 @@ export interface MockCsms {
   ) => Promise<{ messageId: string; payload: unknown }>;
   replyCallResult: (messageId: string, payload: unknown) => void;
   send: (frame: OcppFrame) => void;
+  /** Writes one text frame as given, JSON or not (#1060). */
+  sendText: (raw: string) => void;
   stop: () => Promise<void>;
   closeCurrentConnection: (code?: number) => void;
   connections: () => MockCsmsConnection[];
@@ -287,6 +289,9 @@ export function startMockCsms(options: MockCsmsOptions = {}): MockCsms {
     },
     send(frame) {
       socket?.send(JSON.stringify(frame));
+    },
+    sendText(raw) {
+      socket?.send(raw);
     },
     closeCurrentConnection(code?: number) {
       if (socket) {

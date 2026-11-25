@@ -269,8 +269,11 @@ export class OCPPWebSocket implements ChargePointSocket {
       dispatchDownstream: (raw: string) =>
         dispatchIncomingFrame(raw, {
           logger: this._logger,
+          ocppVersion: this._ocppVersion,
           intercept: (frame) => this._incomingInterceptor?.(frame) ?? false,
           handler: () => this._messageHandler,
+          reply: (frame) =>
+            this._sender.sendRaw(frame, this._currentGeneration),
         }),
       requestSimulatedDisconnect: (reconnectDelayMs, ruleId, ruleType) =>
         this.simulateConnectionLoss(reconnectDelayMs, ruleId, ruleType),

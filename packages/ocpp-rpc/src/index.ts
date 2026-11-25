@@ -6,6 +6,7 @@
 export {
   OCPPMessageType,
   decodeFrame,
+  decodeParsedFrame,
   encodeCall,
   encodeCallError,
   encodeCallResult,
@@ -21,6 +22,7 @@ export {
   type RpcFrame,
   type RpcSendFrame,
 } from "./frames";
+export { UNREADABLE_MESSAGE_ID, malformedFrameReply } from "./malformedFrames";
 export { CallWaiters } from "./CallWaiters";
 export { platformClock, type RpcClock } from "./platformClock";
 export {

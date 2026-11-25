@@ -69,16 +69,23 @@ export async function bootedChargePoint(
 ): Promise<ChargePoint> {
   const cp = stationFor(csms, id, version, options);
   if (version === "OCPP-1.6S") return cp;
-  cp.connect();
-  const boot = await csms.waitForCall("BootNotification");
-  const bootStatus = options.bootStatus ?? "Accepted";
-  csms.replyCallResult(boot.messageId, {
-    status: bootStatus,
-    currentTime: "2026-09-17T00:00:00.000Z",
-    interval: 300,
-  });
-  if (bootStatus === "Accepted") {
-    await csms.waitForFrame(callOf("StatusNotification"));
+  try {
+    cp.connect();
+    const boot = await csms.waitForCall("BootNotification");
+    const bootStatus = options.bootStatus ?? "Accepted";
+    csms.replyCallResult(boot.messageId, {
+      status: bootStatus,
+      currentTime: "2026-09-17T00:00:00.000Z",
+      interval: 300,
+    });
+    if (bootStatus === "Accepted") {
+      await csms.waitForFrame(callOf("StatusNotification"));
+    }
+  } catch (error) {
+    // A boot that failed (timed out) leaves no handle for the caller to
+    // clean up: disconnect the half-initialised station here.
+    cp.disconnect();
+    throw error;
   }
   return cp;
 }

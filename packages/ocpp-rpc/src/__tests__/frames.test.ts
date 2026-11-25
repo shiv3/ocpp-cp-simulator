@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   OCPPMessageType,
   decodeFrame,
+  decodeParsedFrame,
   encodeCall,
   encodeCallError,
   encodeCallResult,
@@ -151,6 +152,7 @@ describe("decodeFrame", () => {
       reason: "unknown-message-type",
       raw,
       messageId: "m1",
+      messageType: JSON.parse(raw)[0],
     });
   });
 
@@ -169,6 +171,12 @@ describe("decodeFrame", () => {
     ["not-array", '{"a":1}', undefined],
     ["unknown-message-type", '[7,"m1","X",{}]', "m1"],
     ["unknown-message-type", '[1,"m1","X",{}]', "m1"],
+    // The type is read before the id: an unknown type with a bad id is still
+    // an unknown type, which OCPP-J ignores.
+    ["unknown-message-type", '[7,42,"X",{}]', undefined],
+    ["invalid-message-type", "[]", undefined],
+    ["invalid-message-type", '["2","m1","Heartbeat",{}]', "m1"],
+    ["invalid-message-type", "[null,7]", undefined],
     ["invalid-message-id", '[2,7,"Heartbeat",{}]', undefined],
     ["invalid-message-id", '[3,"",{}]', undefined],
     ["invalid-action", '[2,"m1",42,{}]', "m1"],
@@ -188,5 +196,23 @@ describe("decodeFrame", () => {
     expect(decoded.kind === "invalid" && decoded.messageId).toBe(
       messageId ?? undefined,
     );
+  });
+});
+
+describe("decodeParsedFrame", () => {
+  it("decodes an already parsed frame like decodeFrame", () => {
+    for (const raw of [
+      '[2,"m1","Heartbeat",{}]',
+      '[3,"m1",{}]',
+      '[4,"m1","GenericError","x",{}]',
+      '{"a":1}',
+      '[2,"m1","Heartbeat"]',
+    ])
+      expect(decodeParsedFrame(JSON.parse(raw), raw)).toEqual(decodeFrame(raw));
+  });
+
+  it("records the message type it could read", () => {
+    expect(decodeFrame('[3,"m1",{},{}]')).toMatchObject({ messageType: 3 });
+    expect(decodeFrame('["3","m1",{}]')).not.toHaveProperty("messageType");
   });
 });

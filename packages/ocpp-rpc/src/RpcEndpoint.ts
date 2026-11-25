@@ -14,6 +14,7 @@ import {
   type RpcDecodeErrorReason,
   type RpcSendFrame,
 } from "./frames";
+import { UNREADABLE_MESSAGE_ID, malformedFrameReply } from "./malformedFrames";
 import type { RpcValidator } from "./validation";
 
 /** The answer to a CALL the peer sent: a CALLRESULT payload. */
@@ -29,9 +30,9 @@ export type RpcSendHandler = (
   context: { readonly messageId: string; readonly action: string },
 ) => void | Promise<void>;
 
-/** A frame the endpoint could not use, never answered (see #978: the
- *  spec-conformant replies are #1060), an answer `send` could not write, or
- *  a SEND that went nowhere: no handler, an invalid payload or a failed
+/** A frame the endpoint could not use (answered with the CALLERROR
+ *  `malformedFrameReply` gives, if any), an answer `send` could not write,
+ *  or a SEND that went nowhere: no handler, an invalid payload or a failed
  *  handler. A SEND is never answered (OCPP 2.1 Part 4 §4.2.4). */
 export interface RpcProtocolProblem {
   readonly reason:
@@ -64,7 +65,8 @@ export interface RpcEndpointOptions {
   readonly callTimeoutMs?: number;
   /** Checks inbound CALL requests and CALLRESULT responses. */
   readonly validate?: RpcValidator;
-  /** Told about every malformed or unmatched frame, every answer `send`
+  /** Told about every malformed or unmatched frame (a malformed one also
+   *  gets the CALLERROR OCPP-J asks for, if any), every answer `send`
    *  could not write, and every SEND that went nowhere. */
   readonly onProtocolError?: (problem: RpcProtocolProblem) => void;
   /** OCPP 2.1: the peer could not process a CALLRESULT this side sent. Its
@@ -250,9 +252,13 @@ export class RpcEndpoint {
       ocpp21: this.options.dialect.ocpp21MessageTypes,
     });
     switch (frame.kind) {
-      case "invalid":
+      case "invalid": {
         this.problem(frame);
+        const reply = malformedFrameReply(frame, this.options.dialect);
+        if (reply !== null)
+          this.reply(frame.messageId ?? UNREADABLE_MESSAGE_ID, reply);
         return;
+      }
       case "call":
         void this.answer(frame);
         return;

@@ -8,11 +8,15 @@ sources:
   - packages/ocpp-rpc/src/RpcEndpoint.ts
   - packages/ocpp-rpc/src/frames.ts
   - packages/ocpp-rpc/src/dialects.ts
+  - packages/ocpp-rpc/src/malformedFrames.ts
   - packages/ocpp-rpc/src/__tests__/RpcEndpoint.test.ts
   - packages/ocpp-rpc/src/__tests__/webSocket.bun.test.ts
   - scripts/check-package-boundaries.ts
   - scripts/check-direct-time.ts
   - packages/core/src/cp/infrastructure/transport/
+  - packages/core/src/cp/infrastructure/transport/ws/wsNetworkSim.ts
+  - "OCPP-J 1.6 specification §4.1.3, §4.2.3 and errata sheet §3.3"
+  - "OCPP 2.0.1 Edition 4 and OCPP 2.1 Edition 2 Part 4 §4.1.3, §4.2.3, §4.2.4, §4.3, §4.4, errata 2026-09"
   - packages/trace/src/logEntryToTrace.ts
 related:
   - ../concepts/ocpp-versions-and-transports.md
@@ -21,7 +25,7 @@ related:
   - ../concepts/network-simulation.md
   - ../concepts/trace-format.md
   - ../concepts/charger-engine.md
-updated: 2026-11-21
+updated: 2026-11-24
 ---
 
 # Reusable OCPP protocol stack
@@ -118,18 +122,19 @@ curated entry point is [`src/index.ts`](../../packages/ocpp-rpc/src/index.ts); t
 manifest still exports `"./*"`, so every consumer imports
 `@ocpp-cp-simulator/ocpp-rpc/index` by convention, not by enforcement.
 
-| Export                                                                                            | What it does                                                                                                                                                                                 |
-| ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `OCPPMessageType`, `encodeCall`, `encodeCallResult`, `encodeCallError`                            | Write the simulator's exact bytes: same key order, CALLERROR `details` default to `{}`                                                                                                       |
-| `encodeCallResultError`, `encodeSend`                                                             | OCPP 2.1 CALLRESULTERROR (`details` default to `{}`) and SEND frames                                                                                                                         |
-| `decodeFrame(raw, { ocpp21? })`                                                                   | A typed `RpcFrame` or an `RpcDecodeError` (`not-json`, `not-array`, `unknown-message-type`, `invalid-message-id`, `invalid-action`, `invalid-error`, `wrong-length`); never throws           |
-| `decodeFrame` and the OCPP 2.1 types                                                              | Decodes the 2.1 SEND and CALLRESULTERROR too, unless `ocpp21: false` (a 1.6 or 2.0.1 reader), which reads them as `unknown-message-type`                                                     |
-| `CallWaiters`, `RpcClock`, `platformClock`                                                        | Pending-call registry with timeouts on a minimal `{ setTimeout, clearTimeout }` clock; defaults to the platform timers                                                                       |
-| `RpcEndpoint`                                                                                     | One side of an OCPP-J link, station or CSMS alike: `handle(action, handler)`, `call(action, payload)`, `receive(raw)`, `close(reason)`; it owns no socket, `send` and `receive` are the link |
-| `RpcEndpoint` on OCPP 2.1, `RpcUnsupportedMessageTypeError`                                       | `send(action, payload)`, `sendCallResultError(…)`, `handleSend(action, handler)`, the `onCallResultError` option; on 1.6 and 2.0.1 the two writes throw the error                            |
-| `OCPP16_RPC_DIALECT`, `OCPP2X_RPC_DIALECT`, `OCPP21_RPC_DIALECT`, `violationKind`                 | Each version's error codes (`FormationViolation` in 1.6, `FormatViolation` in 2.x, …), kept separate rather than generalized; only the 2.1 dialect has SEND and CALLRESULTERROR              |
-| `ocppSchemaValidator(version)`                                                                    | Adapts `@ocpp-cp-simulator/ocpp`'s validators to the endpoint's `validate` hook                                                                                                              |
-| `RpcCallError`, `RpcTimeoutError`, `RpcClosedError`, `RpcInvalidResponseError`, `RpcHandlerError` | The typed outcomes of `call`, and the error a handler throws to choose its CALLERROR                                                                                                         |
+| Export                                                                                            | What it does                                                                                                                                                                                                                                                                                     |
+| ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `OCPPMessageType`, `encodeCall`, `encodeCallResult`, `encodeCallError`                            | Write the simulator's exact bytes: same key order, CALLERROR `details` default to `{}`                                                                                                                                                                                                           |
+| `encodeCallResultError`, `encodeSend`                                                             | OCPP 2.1 CALLRESULTERROR (`details` default to `{}`) and SEND frames                                                                                                                                                                                                                             |
+| `decodeFrame(raw, { ocpp21? })`, `decodeParsedFrame(parsed, raw, …)`                              | A typed `RpcFrame` or an `RpcDecodeError` (`not-json`, `not-array`, `invalid-message-type`, `unknown-message-type`, `invalid-message-id`, `invalid-action`, `invalid-error`, `wrong-length`, with the `messageId` and `messageType` it could read); never throws. The type is read before the id |
+| `malformedFrameReply(error, dialect)`, `UNREADABLE_MESSAGE_ID`                                    | The CALLERROR a rejected frame is due, or `null` ([Malformed frames](#malformed-frames))                                                                                                                                                                                                         |
+| `decodeFrame` and the OCPP 2.1 types                                                              | Decodes the 2.1 SEND and CALLRESULTERROR too, unless `ocpp21: false` (a 1.6 or 2.0.1 reader), which reads them as `unknown-message-type`                                                                                                                                                         |
+| `CallWaiters`, `RpcClock`, `platformClock`                                                        | Pending-call registry with timeouts on a minimal `{ setTimeout, clearTimeout }` clock; defaults to the platform timers                                                                                                                                                                           |
+| `RpcEndpoint`                                                                                     | One side of an OCPP-J link, station or CSMS alike: `handle(action, handler)`, `call(action, payload)`, `receive(raw)`, `close(reason)`; it owns no socket, `send` and `receive` are the link                                                                                                     |
+| `RpcEndpoint` on OCPP 2.1, `RpcUnsupportedMessageTypeError`                                       | `send(action, payload)`, `sendCallResultError(…)`, `handleSend(action, handler)`, the `onCallResultError` option; on 1.6 and 2.0.1 the two writes throw the error                                                                                                                                |
+| `OCPP16_RPC_DIALECT`, `OCPP2X_RPC_DIALECT`, `OCPP21_RPC_DIALECT`, `violationKind`                 | Each version's error codes (`FormationViolation` in 1.6, `FormatViolation` in 2.x, …), kept separate rather than generalized; only the 2.1 dialect has SEND and CALLRESULTERROR                                                                                                                  |
+| `ocppSchemaValidator(version)`                                                                    | Adapts `@ocpp-cp-simulator/ocpp`'s validators to the endpoint's `validate` hook                                                                                                                                                                                                                  |
+| `RpcCallError`, `RpcTimeoutError`, `RpcClosedError`, `RpcInvalidResponseError`, `RpcHandlerError` | The typed outcomes of `call`, and the error a handler throws to choose its CALLERROR                                                                                                                                                                                                             |
 
 `RpcEndpoint` takes `send`, `nextMessageId`, `dialect` and optionally `clock`,
 `callTimeoutMs` (default 30 s), `validate`, `onProtocolError` and
@@ -152,9 +157,10 @@ manifest still exports `"./*"`, so every consumer imports
   `RpcTimeoutError`, `RpcClosedError`, or the error `send` threw.
 - Malformed frames, answers that match no pending call (including a late answer
   to a timed-out call) and answers `send` could not write (`reply-send-failed`)
-  go to `onProtocolError` and are **never answered**. The spec-conformant replies
-  (`RpcFrameworkError`, `MessageTypeNotSupported`, `ProtocolError`) are
-  [#1060](https://github.com/shiv3/ocpp-cp-simulator/issues/1060).
+  go to `onProtocolError`. A malformed frame is then answered with the CALLERROR
+  `malformedFrameReply` gives, if any ([Malformed frames](#malformed-frames),
+  [#1060](https://github.com/shiv3/ocpp-cp-simulator/issues/1060)); the rest are
+  never answered.
 - OCPP 2.1 message types ([#1118](https://github.com/shiv3/ocpp-cp-simulator/issues/1118))
   exist only on `OCPP21_RPC_DIALECT`. On the 1.6 and 2.0.1 dialects, an inbound
   type 5 or 6 stays an unanswered `unknown-message-type`, and `send` and
@@ -198,6 +204,124 @@ domain" criterion made executable. `scripts/check-direct-time.ts` scans
 `packages/ocpp-rpc/src/CallWaiters.ts` and `RpcEndpoint.ts`, so a direct
 `setTimeout` there fails `bun run check:boundaries`; the platform default is
 isolated in `platformClock.ts`.
+
+## Malformed frames
+
+[#1060](https://github.com/shiv3/ocpp-cp-simulator/issues/1060): what a peer
+answers to an incoming text frame that is not OCPP-J for its version. Both
+`RpcEndpoint.receive` and the simulator's inbound path
+(`transport/ws/wsNetworkSim.ts`, `dispatchIncomingFrame`) apply the same rule,
+`malformedFrameReply` in `packages/ocpp-rpc/src/malformedFrames.ts`, with the
+version's dialect.
+
+### What the specifications say
+
+OCPP-J 1.6 (specification 2015-10-08, errata sheet 2025-04):
+
+- §4.1.3: "When a server receives a message with a Message Type Number not in
+  this list, it SHALL ignore the message payload."
+- §4.2.3: "We only use CallError in two situations: 1. An error occurred during
+  the transport of the message. […] 2. The call is received but the content of
+  the call does not meet the requirements for a proper message. This could be
+  missing mandatory fields, an existing call with the same unique identifier is
+  being handled already, unique identifier too long, etc." Its UniqueId "must
+  be the exact same id that is in the call request".
+- Errata §3.3 adds to §4.2.3: "When a server needs to report a 'failure to
+  process the message', the server SHALL use a Message Type: CallError
+  (MessageTypeNumber = 4)."
+- Table 7 has no RPC framework code: the closest are `FormationViolation`
+  ("Payload for Action is syntactically incorrect or not conform the PDU
+  structure for Action"), `ProtocolError` ("Payload for Action is incomplete")
+  and `GenericError` ("Any other error not covered by the previous ones").
+  1.6 says nothing about a frame whose id cannot be read.
+
+OCPP 2.0.1 Edition 4 and OCPP 2.1 Edition 2, Part 4 (2025-12-03):
+
+- §4.2.3 (both): situation 2 adds "invalid JSON or OCPP syntax etc."; "When a
+  server receives a corrupt message, the CALLERROR SHALL NOT directly include
+  syntactically invalid JSON (For example, without encoding it first). When
+  also the MessageId cannot be read, the CALLERROR SHALL contain "-1" as
+  MessageId." and "When a message contains any invalid OCPP and/or it is not
+  conform the JSON schema, the system is allowed to drop the message."
+- §4.3 Table 8 (both): `RpcFrameworkError` "Content of the call is not a valid
+  RPC Request, for example: MessageId could not be read."; `ProtocolError`
+  "Payload for Action is not conform the PDU structure"; `FormatViolation`
+  "Payload for Action is syntactically incorrect"; `MessageTypeNotSupported`
+  "A message with an Message Type Number received that is not supported by this
+  implementation."
+- §4.1.3 (both): "When a system receives a message with a Message Type Number
+  not in this list, it SHALL ignore the message payload."
+- §4.4 in 2.0.1 Edition 4: "When an OCPP 2.0.1 implementation receives a
+  message with an unknown message type, it SHALL respond with an CALLERROR with
+  errorCode: MessageTypeNotSupported." In 2.1 Edition 2, §4.4 instead repeats
+  §4.1.3: ignore it.
+- Errata 2026-09 for both editions: §4.4 is removed in 2.0.1 ("contradictory to
+  section 4.1, which states to ignore unknown message types") and 2.1, and
+  `MessageTypeNotSupported` is deprecated: "As of OCPP 2.1 a message type number
+  that is not supported is silently ignored […]. This is therefore no longer a
+  valid error code."
+- 2.1 §4.2.4: "The receiver SHALL NOT respond to a SEND message with a
+  CALLRESULT or CALLERROR message."
+
+### Decision table
+
+| Frame received                                                                             | 1.6                                             | 2.0.1                                 | 2.1                                      |
+| ------------------------------------------------------------------------------------------ | ----------------------------------------------- | ------------------------------------- | ---------------------------------------- |
+| Not JSON (`not-json`)                                                                      | `[4,"-1","GenericError",…,{}]`                  | `[4,"-1","RpcFrameworkError",…,{}]`   | `[4,"-1","RpcFrameworkError",…,{}]`      |
+| JSON, not an array (`not-array`)                                                           | same                                            | same                                  | same                                     |
+| First element missing or not a number (`invalid-message-type`)                             | CALLERROR under the id if readable, else `"-1"` | same, `RpcFrameworkError`             | same, `RpcFrameworkError`                |
+| Numeric type not of this version: 1, 7, 2.5 … (`unknown-message-type`)                     | ignored                                         | ignored                               | ignored                                  |
+| 5 or 6 (CALLRESULTERROR, SEND)                                                             | ignored (unknown type)                          | ignored (unknown type)                | decoded; malformed ones are not answered |
+| CALL with an unreadable id: not a string, or `""` (`invalid-message-id`)                   | `[4,"-1","GenericError",…,{}]`                  | `[4,"-1","RpcFrameworkError",…,{}]`   | `[4,"-1","RpcFrameworkError",…,{}]`      |
+| CALL with a missing or empty action (`invalid-action`), or not 4 elements (`wrong-length`) | `[4,"<id>","GenericError",…,{}]`                | `[4,"<id>","RpcFrameworkError",…,{}]` | `[4,"<id>","RpcFrameworkError",…,{}]`    |
+| Malformed CALLRESULT or CALLERROR (any reason, `invalid-error` included)                   | not answered                                    | not answered                          | not answered                             |
+
+`…` is a fixed description naming the problem (`Message is not valid JSON`,
+`CALL does not have 4 elements`, …); the received frame is never echoed, so the
+answer cannot carry invalid JSON. `errorDetails` is `{}`. A valid CALL keeps its
+existing answers (`NotImplemented`, the violation codes, `InternalError`).
+
+Decisions where the text is ambiguous or contradicts itself:
+
+1. **Unknown message type: ignored on every version.** 1.6 §4.1.3, 2.0.1 / 2.1
+   §4.1.3 and the 2026-09 errata say ignore; only 2.0.1 Edition 4 §4.4 (removed
+   by the errata) asked for `MessageTypeNotSupported`. Ignoring also cannot loop
+   between two peers that both reject the other's type.
+2. **The RPC framework code on 1.6 is `GenericError`.** 1.6 has no
+   `RpcFrameworkError`, and `FormationViolation` / `ProtocolError` describe the
+   payload of an action, which a frame without a readable envelope does not
+   have. 2.x uses `RpcFrameworkError` for every envelope problem, also for a
+   CALL of the wrong length or without an action, rather than `ProtocolError` /
+   `FormatViolation`, which Table 8 reserves for the payload.
+3. **`"-1"` on 1.6 too.** 1.6 does not say which id answers an unreadable frame,
+   while errata §3.3 makes a CallError the way to report a failure to process
+   one. The 2.x rule is the same framework's later clarification and what CSMS
+   implementations send in practice (`RawFrameSender` already accepts it), so
+   1.6 follows it.
+4. **Only a CALL, or a frame whose type cannot be read, is answered.** A
+   CALLERROR is an "error response to a request message"; answering a broken
+   CALLRESULT or CALLERROR with one would answer an answer, and a SEND is never
+   answered (2.1 §4.2.4). A malformed CALLRESULT on 2.1 is not answered with a
+   CALLRESULTERROR either: Part 4 allows dropping it, and
+   `sendCallResultError` stays an explicit call (decided on #1066). Every reply
+   is itself a well-formed CALLERROR, which the peer does not answer, so two
+   such peers cannot loop.
+5. **Not covered.** A message id longer than 36 characters, or an existing call
+   with the same id, are 1.6 / 2.x §4.2.3 examples of situation 2 but are not
+   checked by the codec; frames that pass `decodeFrame` keep their existing path.
+
+**Simulator inbound path.** `dispatchIncomingFrame` still logs `Received:` first
+and still offers every array of 3 to 5 elements to the #393 interceptor
+(`RawFrameSender`) before checking it, so an expert raw send sees the same
+replies as before. A frame `decodeParsedFrame` rejects is then logged as
+`Invalid message format: <reason>`, never reaches the version's message handler,
+and its CALLERROR, if due, goes out through `FrameSender.sendRaw`: the
+network-simulation pipeline and the `Sent:` log line, like any other frame. The
+dialect follows the station's version (`rpcDialectOf`). Before this change
+every array of 3 to 5 elements reached the message handler, which ignored an
+unknown type and took a three-element CALL for a CALL of the action
+`CallResult`; the rest was logged and dropped. No golden wire fixture sends a
+malformed frame, so none changed.
 
 ## What the proof proves
 
@@ -277,21 +401,21 @@ maintainer can still ask for a change on that pull request.
 
 All are sub-issues of #978.
 
-| Phase                   | Issue                                                           | Work                                                                                                   |
-| ----------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| 1 — model package       | [#1051](https://github.com/shiv3/ocpp-cp-simulator/issues/1051) | Closed by #1065: `scripts/fetch-ocpp-schemas.sh` writes to `packages/ocpp/vendor/`                     |
-| 1 — model package       | [#1052](https://github.com/shiv3/ocpp-cp-simulator/issues/1052) | OCA (CC BY-ND) attribution missing from the CLI and web third-party notices                            |
-| 1 — model package       | #1053                                                           | Publishable `packages/ocpp`: build, curated exports, declared ajv, tarball install check               |
-| 2 — protocol primitives | done here                                                       | `packages/ocpp-rpc`: codec, `CallWaiters`, `RpcEndpoint`, dialects, validator                          |
-| 2 — protocol primitives | [#1118](https://github.com/shiv3/ocpp-cp-simulator/issues/1118) | OCPP 2.1 SEND and CALLRESULTERROR in the codec and the endpoint; core's inline copies removed          |
-| 2 — protocol primitives | #1054                                                           | Generic correlator under `SerialCallQueueV16` / `RequestHistory`, `CallPipelineV201`, `RawFrameSender` |
-| 2 — protocol primitives | #1055                                                           | Frame-observer port replacing log-line parsing in trace                                                |
-| 2 — protocol primitives | #1060                                                           | Spec-conformant replies to malformed frames                                                            |
-| 2 — protocol primitives | [#1062](https://github.com/shiv3/ocpp-cp-simulator/issues/1062) | Mock CSMS helpers and the `wsNetworkSim` inline CALLERROR on the ocpp-rpc codec                        |
-| 2 — protocol primitives | #1059                                                           | Inbound dispatch on ocpp-rpc handler registration (the `ocpp-toolkit` station API)                     |
-| 2 — protocol primitives | #1074                                                           | Typed per-version clients over `RpcEndpoint`, generated from the schemas (decision 3)                  |
-| 3 — transports          | #1056                                                           | Network faults as an injected link decorator; `ChargePointSocket` split                                |
-| 3 — transports          | #1057                                                           | Extract `ocpp-transport-ws`                                                                            |
-| 3 — transports          | #1058                                                           | Extract `ocpp-transport-soap`                                                                          |
-| 3 — transports          | [#1061](https://github.com/shiv3/ocpp-cp-simulator/issues/1061) | Verify the negotiated subprotocol after open                                                           |
-| 4 — independent use     | #1063                                                           | Standalone station and CSMS examples from packed tarballs (blocked by #1053, #1057, #1058)             |
+| Phase                   | Issue                                                                       | Work                                                                                                   |
+| ----------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| 1 — model package       | [#1051](https://github.com/shiv3/ocpp-cp-simulator/issues/1051)             | Closed by #1065: `scripts/fetch-ocpp-schemas.sh` writes to `packages/ocpp/vendor/`                     |
+| 1 — model package       | [#1052](https://github.com/shiv3/ocpp-cp-simulator/issues/1052)             | OCA (CC BY-ND) attribution missing from the CLI and web third-party notices                            |
+| 1 — model package       | #1053                                                                       | Publishable `packages/ocpp`: build, curated exports, declared ajv, tarball install check               |
+| 2 — protocol primitives | done here                                                                   | `packages/ocpp-rpc`: codec, `CallWaiters`, `RpcEndpoint`, dialects, validator                          |
+| 2 — protocol primitives | [#1118](https://github.com/shiv3/ocpp-cp-simulator/issues/1118)             | OCPP 2.1 SEND and CALLRESULTERROR in the codec and the endpoint; core's inline copies removed          |
+| 2 — protocol primitives | #1054                                                                       | Generic correlator under `SerialCallQueueV16` / `RequestHistory`, `CallPipelineV201`, `RawFrameSender` |
+| 2 — protocol primitives | #1055                                                                       | Frame-observer port replacing log-line parsing in trace                                                |
+| 2 — protocol primitives | done here ([#1060](https://github.com/shiv3/ocpp-cp-simulator/issues/1060)) | Spec-conformant replies to malformed frames ([Malformed frames](#malformed-frames))                    |
+| 2 — protocol primitives | [#1062](https://github.com/shiv3/ocpp-cp-simulator/issues/1062)             | Mock CSMS helpers and the `wsNetworkSim` inline CALLERROR on the ocpp-rpc codec                        |
+| 2 — protocol primitives | #1059                                                                       | Inbound dispatch on ocpp-rpc handler registration (the `ocpp-toolkit` station API)                     |
+| 2 — protocol primitives | #1074                                                                       | Typed per-version clients over `RpcEndpoint`, generated from the schemas (decision 3)                  |
+| 3 — transports          | #1056                                                                       | Network faults as an injected link decorator; `ChargePointSocket` split                                |
+| 3 — transports          | #1057                                                                       | Extract `ocpp-transport-ws`                                                                            |
+| 3 — transports          | #1058                                                                       | Extract `ocpp-transport-soap`                                                                          |
+| 3 — transports          | [#1061](https://github.com/shiv3/ocpp-cp-simulator/issues/1061)             | Verify the negotiated subprotocol after open                                                           |
+| 4 — independent use     | #1063                                                                       | Standalone station and CSMS examples from packed tarballs (blocked by #1053, #1057, #1058)             |

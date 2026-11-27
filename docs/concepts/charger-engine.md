@@ -6,6 +6,7 @@ sources:
   - packages/core/src/cp/application/engine/ChargerEngine.ts
   - packages/core/src/cp/application/engine/behaviorContext.ts
   - packages/core/src/cp/application/engine/behaviorLifecycle.ts
+  - packages/core/src/cp/application/engine/behaviorProjection.ts
   - packages/core/src/cp/application/engine/callRunner.ts
   - packages/core/src/cp/application/engine/scope.ts
   - packages/core/src/cp/application/engine/ChargerState.ts
@@ -315,6 +316,20 @@ expected integer, got "2000" (strings are not converted)`). Nothing is coerced.
   `behaviorParams`) only sets its params. [Which ones have knobs](../entities/default-behaviors.md#params).
 - **Disable.** `useBehavior` `mode: "disable"` is a scenario rule per action that answers `ctx.accepted(action)`
   and does nothing after ([order](call-precedence.md#params-and-disable-in-the-order)).
+- **Resolved params projection (#654, for #925 / #927).** `engine.behaviorParamsProjection()` returns a read-only,
+  plain-JSON `BehaviorParamsProjection` (`packages/contracts/src/behavior.ts`; builder
+  `application/engine/behaviorProjection.ts`) so a diagnostic exporter never reads engine internals. Per behavior
+  (sorted by id): `kind`, `version` (always `null`: behaviors carry no version yet), `state` with the three
+  levels kept apart (`selected`: the station configured it; `armed`: a running scenario holds it through
+  `useBehavior`; `active`: it answers CALLs now, so a disabled or still-dormant one is not), `heldBy` (scenario,
+  connector, node, `use` / `disable`, param names), `params` (`defaults`, `selection`, `effective`, and
+  `overrides` that say which key left its default and whether the selection or a scenario decided) and
+  `history` counters (`armed`, `released`, `rearmed`). A run that ended or was cancelled shows as `released` with
+  `heldBy` empty and the overrides gone; a restart (same node armed again while held) counts as `rearmed`. Ended
+  and cancelled runs are not told apart. `serializeBehaviorParams` writes it with sorted keys and redacts values of
+  params named like a secret (password, token, secret, api key, ...) for the `scenario-run.json` snapshot. It is
+  not exposed through `GetConfiguration` / `GetVariables`: #927 stays at selected scenario, run id, state and
+  step / connector.
 - **k6.** The k6 behavior host gives a behavior its declared `defaults` as `ctx.params`; a selector cannot set them
   there, and `export-k6` refuses a `useBehavior` node.
 

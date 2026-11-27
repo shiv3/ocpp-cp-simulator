@@ -1,6 +1,7 @@
 import type {
   Behavior,
   BehaviorContext,
+  BehaviorParamsProjection,
   CallBehavior,
   JsonObject,
   JsonValue,
@@ -11,6 +12,8 @@ import type { EngineEvent } from "./ChargerState";
 import { ruleKey, ruleOwnerKey } from "../behavior/BehaviorRegistry";
 import type { BehaviorRule, RuleOwner } from "../behavior/BehaviorRegistry";
 import { mergeParams } from "../behavior/paramsSchema";
+import { projectBehaviorParams } from "./behaviorProjection";
+import type { BehaviorProjectionInput } from "./behaviorProjection";
 import { behaviorFitProblem, behaviorShapeProblem } from "./behaviorFit";
 import { cannedResponse } from "./responseValidation";
 import { Scope } from "./scope";
@@ -64,6 +67,66 @@ export interface BehaviorLifecycleEngine {
  */
 export class BehaviorLifecycle {
   constructor(private readonly e: BehaviorLifecycleEngine) {}
+
+  /** What the params projection reports: who holds each behavior, and how often. */
+  private readonly holds = new Map<
+    string,
+    Map<string, { owner: RuleOwner; mode: "use" | "disable" }>
+  >();
+  private readonly history = new Map<
+    string,
+    { armed: number; released: number; rearmed: number }
+  >();
+
+  private recordHold(
+    id: string,
+    owner: RuleOwner,
+    mode: "use" | "disable",
+  ): void {
+    const key = ruleOwnerKey(owner);
+    const held = this.holds.get(id) ?? new Map();
+    const counts = this.history.get(id) ?? {
+      armed: 0,
+      released: 0,
+      rearmed: 0,
+    };
+    counts.armed++;
+    if (held.has(key)) counts.rearmed++;
+    held.delete(key);
+    held.set(key, { owner, mode });
+    this.holds.set(id, held);
+    this.history.set(id, counts);
+  }
+
+  /** The resolved params of every behavior, read-only (see {@link projectBehaviorParams}). */
+  projectParams(): BehaviorParamsProjection {
+    const entries: BehaviorProjectionInput[] = [];
+    const seen = new Set<string>();
+    for (const [kind, table] of [
+      ["default", this.e.defaultsById],
+      ["code", this.e.loaded],
+    ] as const) {
+      for (const [id, behavior] of table) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+        entries.push({
+          id,
+          kind,
+          behavior,
+          dormant: this.e.dormant.has(id),
+          selection: this.e.selectionParams.get(id),
+          layers: [...(this.e.paramLayers.get(id)?.values() ?? [])],
+          holds: [...(this.holds.get(id)?.values() ?? [])],
+          history: this.history.get(id) ?? {
+            armed: 0,
+            released: 0,
+            rearmed: 0,
+          },
+        });
+      }
+    }
+    return projectBehaviorParams(entries);
+  }
 
   // ---- code behaviors -----------------------------------------------------
 
@@ -248,6 +311,7 @@ export class BehaviorLifecycle {
     // Selecting a behavior again under the same owner (a `useBehavior` node
     // in a loop) replaces its params and rules instead of stacking them.
     this.setParamLayer(id, behavior, owner, params);
+    this.recordHold(id, owner, "use");
     if (builtin || !this.e.dormant.has(id)) return;
     this.e.host.behaviors.release((held) => ruleOwnerKey(held) === key);
     this.registerRules(behavior, owner);
@@ -322,6 +386,7 @@ export class BehaviorLifecycle {
       for (const off of unregister) off();
       throw error;
     }
+    this.recordHold(id, owner, "disable");
   }
 
   // ---- params -------------------------------------------------------------
@@ -435,6 +500,15 @@ export class BehaviorLifecycle {
    * Rules are released with `BehaviorRegistry.release`, which the caller does.
    */
   deactivateBehaviors(owned: (owner: RuleOwner) => boolean): void {
+    for (const [id, held] of [...this.holds]) {
+      for (const [key, hold] of [...held]) {
+        if (!owned(hold.owner)) continue;
+        held.delete(key);
+        const counts = this.history.get(id);
+        if (counts) counts.released++;
+      }
+      if (held.size === 0) this.holds.delete(id);
+    }
     for (const [id, layers] of [...this.e.paramLayers]) {
       for (const [key, layer] of [...layers]) {
         if (owned(layer.owner)) layers.delete(key);
@@ -494,6 +568,8 @@ export class BehaviorLifecycle {
     this.e.holders.delete(id);
     this.e.selectionParams.delete(id);
     this.e.paramLayers.delete(id);
+    this.holds.delete(id);
+    this.history.delete(id);
     this.e.refreshHooked();
     this.e.endHookContext(id);
     this.e.pendingMains.get(id)?.();
